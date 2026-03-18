@@ -1,0 +1,19 @@
+﻿# Root ignores
+.vscode/
+.idea/
+*.iml
+
+# Maven build outputs
+**/target/
+
+# Runtime logs
+**/boot-run.log
+**/boot-run.err.log
+**/boot-run.out.log
+*.log
+*.out
+*.err
+
+# OS/editor
+Thumbs.db
+.DS_Store

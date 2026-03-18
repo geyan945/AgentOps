@@ -1,0 +1,80 @@
+server:
+  port: 18084
+
+spring:
+  application:
+    name: agentops-app
+  datasource:
+    url: jdbc:mysql://localhost:3406/agentops?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: 123456
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: localhost
+      port: 16379
+      password: 123456
+      timeout: 3000ms
+      repositories:
+        enabled: false
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+jwt:
+  secret: agentops-jwt-secret-key-2026-03-18
+  expire-seconds: 86400
+
+agent:
+  planner:
+    provider: rule
+    prompt-version: planner-v1
+  answer:
+    provider: rule
+    prompt-version: answer-v1
+  max-tool-calls: 2
+  max-steps: 4
+  rate-limit:
+    enabled: true
+    run-per-minute: 20
+    eval-per-minute: 3
+  cache:
+    tool:
+      enabled: true
+    kb-search-ttl-seconds: 300
+    doc-fetch-ttl-seconds: 600
+    sql-query-ttl-seconds: 60
+    session-summary-ttl-seconds: 600
+    session-summary-max-messages: 8
+  eval:
+    pass-score: 0.6
+  kb:
+    default-knowledge-base-id: 1
+    es:
+      enabled: true
+      base-url: http://localhost:19200
+      index-name: qa_document_chunks
+  mcp:
+    enabled: true
+    base-url: http://localhost:18084/api/mcp
+    prefer-remote-tools: true
+
+gemini:
+  base-url: https://generativelanguage.googleapis.com
+  api-key: ${GEMINI_API_KEY:}
+  chat-model: gemini-2.5-flash

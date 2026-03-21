@@ -12,4 +12,8 @@ public class AgentRunRequest {
 
     @NotBlank(message = "message 不能为空")
     private String message;
+
+    private String executionMode;
+
+    private String approvalPolicy;
 }

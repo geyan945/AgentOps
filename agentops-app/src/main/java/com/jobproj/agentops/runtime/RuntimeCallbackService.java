@@ -1,0 +1,189 @@
+package com.jobproj.agentops.runtime;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jobproj.agentops.common.BusinessException;
+import com.jobproj.agentops.common.ErrorCode;
+import com.jobproj.agentops.dto.agent.AgentRunStepResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeContextResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeMessageResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeStatusCallbackRequest;
+import com.jobproj.agentops.dto.runtime.RuntimeStepCallbackRequest;
+import com.jobproj.agentops.entity.AgentMessage;
+import com.jobproj.agentops.entity.AgentRun;
+import com.jobproj.agentops.entity.AgentRunStep;
+import com.jobproj.agentops.entity.AgentSession;
+import com.jobproj.agentops.repository.AgentMessageRepository;
+import com.jobproj.agentops.repository.AgentRunRepository;
+import com.jobproj.agentops.repository.AgentRunStepRepository;
+import com.jobproj.agentops.tool.ToolRegistry;
+import com.jobproj.agentops.service.SessionService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class RuntimeCallbackService {
+
+    private final AgentRunRepository agentRunRepository;
+    private final AgentRunStepRepository agentRunStepRepository;
+    private final AgentMessageRepository agentMessageRepository;
+    private final SessionService sessionService;
+    private final ToolRegistry toolRegistry;
+    private final AgentMemoryService agentMemoryService;
+    private final AgentHumanTaskService humanTaskService;
+    private final ObjectMapper objectMapper;
+
+    @Transactional(readOnly = true)
+    public RuntimeContextResponse buildContext(Long sessionId) {
+        AgentSession session = sessionService.getRequiredSessionById(sessionId);
+        AgentRun run = agentRunRepository.findBySessionIdOrderByIdDesc(sessionId).stream().findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND, "session 当前没有运行记录"));
+        List<RuntimeMessageResponse> messages = agentMessageRepository.findBySessionIdOrderByIdAsc(sessionId).stream()
+                .map(this::toRuntimeMessage)
+                .toList();
+        return RuntimeContextResponse.builder()
+                .runId(run.getId())
+                .sessionId(sessionId)
+                .userId(session.getUserId())
+                .userInput(run.getUserInput())
+                .status(run.getStatus())
+                .conversationSummary(sessionService.getSessionSummary(session.getUserId(), sessionId).getSummary())
+                .messages(messages)
+                .memoryFacts(agentMemoryService.listBySessionId(sessionId))
+                .tools(toolRegistry.listTools())
+                .build();
+    }
+
+    @Transactional
+    public AgentRunStepResponse saveStep(Long runId, RuntimeStepCallbackRequest request) {
+        AgentRun run = getRequiredRun(runId);
+        AgentRunStep step = new AgentRunStep();
+        step.setRunId(runId);
+        step.setStepNo(request.getStepNo() == null ? (int) agentRunStepRepository.countByRunId(runId) + 1 : request.getStepNo());
+        step.setStepType(request.getStepType());
+        step.setNodeId(request.getNodeId());
+        step.setNodeLabel(request.getNodeLabel());
+        step.setToolName(request.getToolName());
+        step.setAttemptNo(request.getAttemptNo());
+        step.setParentStepId(request.getParentStepId());
+        step.setInputJson(writeJson(request.getInput()));
+        step.setOutputJson(writeJson(request.getOutput()));
+        step.setStateBeforeJson(writeJson(request.getStateBefore()));
+        step.setStateAfterJson(writeJson(request.getStateAfter()));
+        step.setObservationJson(writeJson(request.getObservation()));
+        step.setLatencyMs(request.getLatencyMs());
+        step.setModelName(request.getModelName());
+        step.setPromptVersion(request.getPromptVersion());
+        step.setSuccess(Boolean.TRUE.equals(request.getSuccess()));
+        step.setErrorMessage(request.getErrorMessage());
+        AgentRunStep saved = agentRunStepRepository.save(step);
+        run.setTotalSteps((int) agentRunStepRepository.countByRunId(runId));
+        run.setCurrentNode(request.getNodeId());
+        agentRunRepository.save(run);
+
+        if ("HUMAN_TASK".equalsIgnoreCase(request.getStepType())) {
+            humanTaskService.createPendingTask(
+                    run.getId(),
+                    run.getSessionId(),
+                    run.getUserId(),
+                    request.getNodeId(),
+                    "APPROVAL",
+                    "需要人工确认",
+                    request.getErrorMessage() == null ? "运行进入人工审批" : request.getErrorMessage(),
+                    request.getObservation()
+            );
+        }
+        return AgentRunStepResponse.builder()
+                .id(saved.getId())
+                .stepNo(saved.getStepNo())
+                .stepType(saved.getStepType())
+                .nodeId(saved.getNodeId())
+                .nodeLabel(saved.getNodeLabel())
+                .toolName(saved.getToolName())
+                .attemptNo(saved.getAttemptNo())
+                .parentStepId(saved.getParentStepId())
+                .inputJson(saved.getInputJson())
+                .outputJson(saved.getOutputJson())
+                .stateBeforeJson(saved.getStateBeforeJson())
+                .stateAfterJson(saved.getStateAfterJson())
+                .observationJson(saved.getObservationJson())
+                .latencyMs(saved.getLatencyMs())
+                .modelName(saved.getModelName())
+                .promptVersion(saved.getPromptVersion())
+                .success(saved.getSuccess())
+                .errorMessage(saved.getErrorMessage())
+                .createdAt(saved.getCreatedAt())
+                .build();
+    }
+
+    @Transactional
+    public void updateStatus(Long runId, RuntimeStatusCallbackRequest request) {
+        AgentRun run = getRequiredRun(runId);
+        run.setStatus(request.getStatus());
+        run.setCurrentNode(request.getCurrentNode());
+        run.setGraphName(request.getGraphName());
+        run.setGraphVersion(request.getGraphVersion());
+        run.setRequiresHuman(Boolean.TRUE.equals(request.getRequiresHuman()));
+        run.setResumeToken(request.getResumeToken());
+        if (request.getCheckpointVersion() != null) {
+            run.setCheckpointVersion(request.getCheckpointVersion());
+            run.setLastCheckpointAt(LocalDateTime.now());
+        }
+        run.setFinalAnswer(request.getFinalAnswer());
+        run.setArtifactsJson(writeJson(request.getArtifacts()));
+        run.setCitationsJson(writeJson(request.getCitations()));
+        run.setErrorMessage(request.getErrorMessage());
+        if (isTerminalStatus(request.getStatus())) {
+            run.setFinishedAt(LocalDateTime.now());
+            run.setTotalSteps((int) agentRunStepRepository.countByRunId(runId));
+            if (run.getCreatedAt() != null) {
+                run.setTotalLatencyMs(Math.max(0L, java.time.Duration.between(run.getCreatedAt(), LocalDateTime.now()).toMillis()));
+            }
+            run.setRequiresHuman(false);
+            run.setResumeToken(null);
+        }
+        agentRunRepository.save(run);
+        if (request.getFinalAnswer() != null && !request.getFinalAnswer().isBlank()) {
+            sessionService.saveMessage(run.getSessionId(), "assistant", request.getFinalAnswer(), writeJson(request.getCitations()));
+        }
+        if (request.getMemoryFacts() != null) {
+            agentMemoryService.replaceFacts(run.getUserId(), run.getSessionId(), runId, request.getMemoryFacts());
+        }
+    }
+
+    private AgentRun getRequiredRun(Long runId) {
+        return agentRunRepository.findById(runId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND));
+    }
+
+    private RuntimeMessageResponse toRuntimeMessage(AgentMessage message) {
+        return RuntimeMessageResponse.builder()
+                .id(message.getId())
+                .role(message.getRole())
+                .content(message.getContent())
+                .metadataJson(message.getMetadataJson())
+                .createdAt(message.getCreatedAt())
+                .build();
+    }
+
+    private boolean isTerminalStatus(String status) {
+        return "SUCCEEDED".equalsIgnoreCase(status)
+                || "FAILED".equalsIgnoreCase(status)
+                || "CANCELLED".equalsIgnoreCase(status);
+    }
+
+    private String writeJson(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            return String.valueOf(value);
+        }
+    }
+}

@@ -35,9 +35,45 @@ public class EvalResult {
     @Column(nullable = false)
     private Double score = 0D;
 
+    @Column(name = "route_score")
+    private Double routeScore;
+
+    @Column(name = "grounding_score")
+    private Double groundingScore;
+
+    @Column(name = "citation_score")
+    private Double citationScore;
+
+    @Column(name = "final_score")
+    private Double finalScore;
+
+    @Column(name = "retry_count")
+    private Integer retryCount;
+
     @Lob
     @Column(columnDefinition = "MEDIUMTEXT")
     private String reason;
+
+    @Lob
+    @Column(name = "tool_trace_json", columnDefinition = "MEDIUMTEXT")
+    private String toolTraceJson;
+
+    @Lob
+    @Column(name = "node_path_json", columnDefinition = "MEDIUMTEXT")
+    private String nodePathJson;
+
+    @Column(name = "approval_triggered")
+    private Boolean approvalTriggered;
+
+    @Column(name = "approval_decision", length = 64)
+    private String approvalDecision;
+
+    @Column(name = "judge_model", length = 128)
+    private String judgeModel;
+
+    @Lob
+    @Column(name = "judge_reason", columnDefinition = "MEDIUMTEXT")
+    private String judgeReason;
 
     @Column(name = "latency_ms")
     private Long latencyMs;

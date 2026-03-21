@@ -3,6 +3,8 @@ package com.jobproj.agentops.agent;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Builder
 public class EvalCaseExecutionResult {
@@ -13,4 +15,12 @@ public class EvalCaseExecutionResult {
     private Long latencyMs;
     private Boolean success;
     private String errorMessage;
+    private Integer retryCount;
+    private Integer citationCount;
+    private String route;
+    private Boolean approvalTriggered;
+    private String approvalDecision;
+    private List<String> nodePath;
+    private List<String> artifactTypes;
+    private List<String> toolTrace;
 }

@@ -5,6 +5,8 @@
 
 # Maven build outputs
 **/target/
+**/dist/
+**/node_modules/
 
 # Runtime logs
 **/boot-run.log
@@ -17,3 +19,8 @@
 # OS/editor
 Thumbs.db
 .DS_Store
+
+# Python runtime
+**/__pycache__/
+**/.pytest_cache/
+*.pyc

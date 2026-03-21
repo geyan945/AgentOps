@@ -14,6 +14,7 @@ public enum ErrorCode {
     SESSION_NOT_FOUND(4201, "会话不存在"),
     RUN_NOT_FOUND(4202, "运行记录不存在"),
     MESSAGE_NOT_FOUND(4203, "消息不存在"),
+    HUMAN_TASK_NOT_FOUND(4204, "人工任务不存在"),
     EVAL_DATASET_NOT_FOUND(4251, "评测数据集不存在"),
     EVAL_RUN_NOT_FOUND(4252, "评测任务不存在"),
     TOOL_NOT_FOUND(4301, "工具不存在或未启用"),
@@ -22,6 +23,9 @@ public enum ErrorCode {
     KB_SEARCH_FAILED(4304, "知识库检索失败"),
     INVALID_SQL_QUERY_TYPE(4305, "不支持的 SQL 查询模板"),
     AGENT_EXECUTION_FAILED(4401, "Agent 执行失败"),
+    RUNTIME_UNAVAILABLE(4402, "Agent Runtime 不可用"),
+    RUNTIME_CHECKPOINT_NOT_FOUND(4403, "运行检查点不存在"),
+    INVALID_RESUME_TOKEN(4404, "resume token 无效或已过期"),
     INTERNAL_ERROR(5000, "系统内部错误");
 
     private final int code;

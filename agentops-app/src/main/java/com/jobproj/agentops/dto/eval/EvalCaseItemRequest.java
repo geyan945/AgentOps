@@ -15,5 +15,15 @@ public class EvalCaseItemRequest {
 
     private String expectedTool;
 
+    private String expectedRoute;
+
     private List<String> expectedKeywords;
+
+    private List<String> expectedNodePath;
+
+    private String expectedApprovalPolicy;
+
+    private Integer expectedCitationMin;
+
+    private List<String> expectedArtifactTypes;
 }

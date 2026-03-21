@@ -12,5 +12,10 @@ public class EvalCaseResponse {
     private Long id;
     private String question;
     private String expectedTool;
+    private String expectedRoute;
     private List<String> expectedKeywords;
+    private List<String> expectedNodePath;
+    private String expectedApprovalPolicy;
+    private Integer expectedCitationMin;
+    private List<String> expectedArtifactTypes;
 }

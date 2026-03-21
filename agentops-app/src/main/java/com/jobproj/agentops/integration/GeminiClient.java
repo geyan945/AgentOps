@@ -28,6 +28,10 @@ public class GeminiClient {
         return StringUtils.hasText(apiKey);
     }
 
+    public String currentModel() {
+        return chatModel;
+    }
+
     public String generateText(String prompt) {
         RestClient client = RestClient.builder().baseUrl(baseUrl).build();
         Map<String, Object> body = Map.of(

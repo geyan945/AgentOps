@@ -44,6 +44,11 @@ public class SessionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
     }
 
+    public AgentSession getRequiredSessionById(Long sessionId) {
+        return sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+    }
+
     public List<MessageResponse> listMessages(Long userId, Long sessionId) {
         getRequiredSession(userId, sessionId);
         return messageRepository.findBySessionIdOrderByIdAsc(sessionId).stream().map(this::toMessageResponse).toList();

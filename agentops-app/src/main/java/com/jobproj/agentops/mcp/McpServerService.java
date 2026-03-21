@@ -32,13 +32,14 @@ public class McpServerService {
                 .serverName("agentops-local-mcp")
                 .version("v1")
                 .protocolVersion("2026-03-18")
-                .description("AgentOps local MCP server for kb_search and sql_query")
+                .description("AgentOps local MCP server for kb_search, doc_fetch and sql_query")
                 .build();
     }
 
     public List<ToolInfoResponse> listTools() {
         return List.of(
                 ToolInfoResponse.builder().name("kb_search").description("在 AISmartQA 的知识库 chunk 中检索相关内容").argumentNames(List.of("query", "topK", "knowledgeBaseId")).build(),
+                ToolInfoResponse.builder().name("doc_fetch").description("读取指定文档的完整内容").argumentNames(List.of("documentId")).build(),
                 ToolInfoResponse.builder().name("sql_query").description("执行只读白名单 SQL 模板查询，用于统计和报表场景").argumentNames(List.of("queryType", "knowledgeBaseId")).build()
         );
     }
@@ -46,6 +47,7 @@ public class McpServerService {
     public McpToolCallResponse callTool(String toolName, JsonNode arguments) {
         return switch (toolName) {
             case "kb_search" -> executeKbSearch(arguments);
+            case "doc_fetch" -> executeDocFetch(arguments);
             case "sql_query" -> executeSqlQuery(arguments);
             default -> throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "MCP 工具不存在: " + toolName);
         };
@@ -83,5 +85,16 @@ public class McpServerService {
         }
         data.put("queryType", queryType);
         return McpToolCallResponse.builder().toolName("sql_query").success(true).summary("MCP SQL 模板查询完成: " + queryType).data(data).build();
+    }
+
+    private McpToolCallResponse executeDocFetch(JsonNode arguments) {
+        Long documentId = arguments.path("documentId").asLong();
+        JsonNode data = aiSmartQaReadService.fetchDocument(documentId);
+        return McpToolCallResponse.builder()
+                .toolName("doc_fetch")
+                .success(true)
+                .summary("MCP 文档读取完成: " + documentId)
+                .data(data)
+                .build();
     }
 }

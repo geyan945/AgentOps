@@ -41,12 +41,18 @@ jwt:
   expire-seconds: 86400
 
 agent:
+  internal:
+    api-key: ${AGENTOPS_INTERNAL_KEY:agentops-internal-key}
   planner:
     provider: rule
     prompt-version: planner-v1
   answer:
     provider: rule
     prompt-version: answer-v1
+  runtime:
+    base-url: http://localhost:18085
+    default-graph-name: enterprise-copilot
+    default-graph-version: v2
   max-tool-calls: 2
   max-steps: 4
   rate-limit:

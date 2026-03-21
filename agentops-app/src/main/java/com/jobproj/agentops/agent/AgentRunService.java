@@ -1,33 +1,34 @@
 package com.jobproj.agentops.agent;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobproj.agentops.common.BusinessException;
 import com.jobproj.agentops.common.ErrorCode;
+import com.jobproj.agentops.dto.agent.AgentGraphResponse;
 import com.jobproj.agentops.dto.agent.AgentRunRequest;
 import com.jobproj.agentops.dto.agent.AgentRunResponse;
+import com.jobproj.agentops.dto.agent.AgentRunResumeRequest;
 import com.jobproj.agentops.dto.agent.AgentRunStepResponse;
-import com.jobproj.agentops.dto.agent.ToolInfoResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeResumeRunRequest;
+import com.jobproj.agentops.dto.runtime.RuntimeStartRunRequest;
+import com.jobproj.agentops.entity.AgentHumanTask;
 import com.jobproj.agentops.entity.AgentRun;
 import com.jobproj.agentops.entity.AgentRunStep;
 import com.jobproj.agentops.entity.AgentSession;
 import com.jobproj.agentops.repository.AgentRunRepository;
 import com.jobproj.agentops.repository.AgentRunStepRepository;
+import com.jobproj.agentops.runtime.AgentGraphService;
+import com.jobproj.agentops.runtime.AgentHumanTaskService;
+import com.jobproj.agentops.runtime.RuntimeCheckpointService;
+import com.jobproj.agentops.runtime.RuntimeClient;
 import com.jobproj.agentops.service.RateLimitService;
 import com.jobproj.agentops.service.SessionService;
-import com.jobproj.agentops.tool.ToolContext;
-import com.jobproj.agentops.tool.ToolExecutor;
-import com.jobproj.agentops.tool.ToolPermissionService;
-import com.jobproj.agentops.tool.ToolRegistry;
-import com.jobproj.agentops.tool.ToolResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -37,15 +38,17 @@ public class AgentRunService {
     private final SessionService sessionService;
     private final AgentRunRepository agentRunRepository;
     private final AgentRunStepRepository agentRunStepRepository;
-    private final AgentPlannerService agentPlannerService;
-    private final AgentAnswerService agentAnswerService;
-    private final ToolRegistry toolRegistry;
-    private final ToolPermissionService toolPermissionService;
-    private final ObjectMapper objectMapper;
     private final RateLimitService rateLimitService;
+    private final RuntimeClient runtimeClient;
+    private final AgentGraphService agentGraphService;
+    private final AgentHumanTaskService humanTaskService;
+    private final RuntimeCheckpointService runtimeCheckpointService;
 
-    @Value("${agent.max-tool-calls:2}")
-    private int maxToolCalls;
+    @Value("${agent.runtime.default-graph-name:enterprise-copilot}")
+    private String defaultGraphName;
+
+    @Value("${agent.runtime.default-graph-version:v2}")
+    private String defaultGraphVersion;
 
     @Transactional
     public AgentRunResponse execute(Long userId, AgentRunRequest request) {
@@ -56,78 +59,100 @@ public class AgentRunService {
 
         AgentRun run = new AgentRun();
         run.setSessionId(session.getId());
+        run.setUserId(userId);
         run.setUserInput(request.getMessage());
-        run.setStatus("RUNNING");
+        run.setRuntimeType("LANGGRAPH");
+        run.setExecutionMode(normalizeOrDefault(request.getExecutionMode(), "USER"));
+        run.setApprovalPolicy(normalizeOrDefault(request.getApprovalPolicy(), "MANUAL"));
+        run.setGraphName(defaultGraphName);
+        run.setGraphVersion(defaultGraphVersion);
+        run.setCurrentNode("intake_guardrail");
+        run.setStatus("QUEUED");
         run = agentRunRepository.save(run);
 
-        Instant runStart = Instant.now();
-        List<ToolResult> toolResults = new ArrayList<>();
-        int stepNo = 1;
         try {
-            List<ToolInfoResponse> tools = toolRegistry.listTools();
-            PlannerResult plannerResult = agentPlannerService.plan(request.getMessage(), tools);
-            saveStep(run.getId(), stepNo++, "PLAN", null, plannerResult, plannerResult, true, null, 0L);
-
-            if ("CALL_TOOLS".equalsIgnoreCase(plannerResult.getDecision()) && plannerResult.getToolCalls() != null) {
-                int toolCallCount = 0;
-                for (ToolCallPlan toolCallPlan : plannerResult.getToolCalls()) {
-                    if (toolCallCount >= maxToolCalls) {
-                        break;
-                    }
-                    if (!toolPermissionService.canUse(userId, toolCallPlan.getToolName())) {
-                        throw new BusinessException(ErrorCode.FORBIDDEN, "当前用户无权限调用工具: " + toolCallPlan.getToolName());
-                    }
-                    ToolExecutor toolExecutor = toolRegistry.getRequired(toolCallPlan.getToolName());
-                    Instant stepStart = Instant.now();
-                    ToolResult toolResult = toolExecutor.execute(toolCallPlan.getArguments(), ToolContext.builder().userId(userId).sessionId(session.getId()).runId(run.getId()).build());
-                    long latencyMs = Duration.between(stepStart, Instant.now()).toMillis();
-                    saveStep(run.getId(), stepNo++, "TOOL_CALL", toolExecutor.getName(), toolCallPlan, toolResult, true, null, latencyMs);
-                    toolResults.add(toolResult);
-                    toolCallCount++;
-                }
-            }
-
-            Instant answerStart = Instant.now();
-            String finalAnswer = agentAnswerService.answer(request.getMessage(), toolResults);
-            long answerLatency = Duration.between(answerStart, Instant.now()).toMillis();
-            saveStep(run.getId(), stepNo++, "FINAL_ANSWER", null, request.getMessage(), finalAnswer, true, null, answerLatency);
-            sessionService.saveMessage(session.getId(), "assistant", finalAnswer, null);
-
-            run.setFinalAnswer(finalAnswer);
-            run.setStatus("SUCCEEDED");
-            run.setTotalSteps(stepNo - 1);
-            run.setTotalLatencyMs(Duration.between(runStart, Instant.now()).toMillis());
-            run.setFinishedAt(LocalDateTime.now());
+            RuntimeCommandResponse response = runtimeClient.startRun(RuntimeStartRunRequest.builder()
+                    .runId(run.getId())
+                    .sessionId(run.getSessionId())
+                    .userId(userId)
+                    .userInput(request.getMessage())
+                    .executionMode(run.getExecutionMode())
+                    .approvalPolicy(run.getApprovalPolicy())
+                    .waitForCompletion(false)
+                    .build());
+            run.setStatus(response == null || !response.isAccepted() ? "RUNNING" : response.getStatus());
+            run.setCurrentNode(response == null ? "intake_guardrail" : response.getCurrentNode());
             agentRunRepository.save(run);
-            return getRun(userId, run.getId());
         } catch (Exception ex) {
-            run.setStatus("FAILED");
-            run.setErrorMessage(ex.getMessage());
-            run.setTotalSteps(stepNo - 1);
-            run.setTotalLatencyMs(Duration.between(runStart, Instant.now()).toMillis());
-            run.setFinishedAt(LocalDateTime.now());
-            agentRunRepository.save(run);
-            if (ex instanceof BusinessException businessException) {
-                throw businessException;
-            }
-            throw new BusinessException(ErrorCode.AGENT_EXECUTION_FAILED, ex.getMessage());
+            markRunFailed(run, "启动 runtime 失败: " + ex.getMessage());
         }
+        return getRun(userId, run.getId());
+    }
+
+    @Transactional
+    public AgentRunResponse resume(Long userId, Long runId, AgentRunResumeRequest request) {
+        AgentRun run = getRequiredRun(userId, runId);
+        AgentHumanTask task = humanTaskService.getPendingTaskByRunId(runId);
+        if (!task.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权限处理当前人工任务");
+        }
+        runtimeCheckpointService.getCheckpoint(runId);
+        humanTaskService.decideTask(task, userId, request.getDecision(), request.getComment());
+        run.setStatus("RUNNING");
+        run.setRequiresHuman(false);
+        agentRunRepository.save(run);
+        try {
+            String resumeToken = request.getResumeToken() != null ? request.getResumeToken() : run.getResumeToken();
+            Integer checkpointVersion = request.getCheckpointVersion() != null ? request.getCheckpointVersion() : run.getCheckpointVersion();
+            if (resumeToken == null || checkpointVersion == null) {
+                throw new BusinessException(ErrorCode.INVALID_RESUME_TOKEN, "当前 run 缺少可恢复 checkpoint");
+            }
+            RuntimeCommandResponse response = runtimeClient.resumeRun(RuntimeResumeRunRequest.builder()
+                    .runId(runId)
+                    .decision(request.getDecision())
+                    .comment(request.getComment())
+                    .resumeToken(resumeToken)
+                    .checkpointVersion(checkpointVersion)
+                    .waitForCompletion(false)
+                    .build());
+            if (response != null) {
+                run.setStatus(response.getStatus());
+                run.setCurrentNode(response.getCurrentNode());
+                agentRunRepository.save(run);
+            }
+        } catch (Exception ex) {
+            markRunFailed(run, "恢复 runtime 失败: " + ex.getMessage());
+        }
+        return getRun(userId, runId);
     }
 
     @Transactional(readOnly = true)
     public AgentRunResponse getRun(Long userId, Long runId) {
-        AgentRun run = agentRunRepository.findById(runId).orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND));
-        sessionService.getRequiredSession(userId, run.getSessionId());
+        AgentRun run = getRequiredRun(userId, runId);
         List<AgentRunStepResponse> steps = agentRunStepRepository.findByRunIdOrderByStepNoAsc(runId).stream().map(this::toStepResponse).toList();
         return AgentRunResponse.builder()
                 .id(run.getId())
+                .runId(run.getId())
                 .sessionId(run.getSessionId())
+                .userId(run.getUserId())
                 .status(run.getStatus())
+                .runtimeType(run.getRuntimeType())
+                .executionMode(run.getExecutionMode())
+                .approvalPolicy(run.getApprovalPolicy())
+                .graphName(run.getGraphName())
+                .graphVersion(run.getGraphVersion())
+                .currentNode(run.getCurrentNode())
+                .requiresHuman(run.getRequiresHuman())
+                .resumeToken(run.getResumeToken())
+                .checkpointVersion(run.getCheckpointVersion())
                 .finalAnswer(run.getFinalAnswer())
+                .artifactsJson(run.getArtifactsJson())
+                .citationsJson(run.getCitationsJson())
                 .totalSteps(run.getTotalSteps())
                 .totalLatencyMs(run.getTotalLatencyMs())
                 .errorMessage(run.getErrorMessage())
                 .createdAt(run.getCreatedAt())
+                .lastCheckpointAt(run.getLastCheckpointAt())
                 .finishedAt(run.getFinishedAt())
                 .steps(steps)
                 .build();
@@ -135,34 +160,19 @@ public class AgentRunService {
 
     @Transactional(readOnly = true)
     public List<AgentRunStepResponse> listSteps(Long userId, Long runId) {
-        AgentRun run = agentRunRepository.findById(runId).orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND));
-        sessionService.getRequiredSession(userId, run.getSessionId());
+        getRequiredRun(userId, runId);
         return agentRunStepRepository.findByRunIdOrderByStepNoAsc(runId).stream().map(this::toStepResponse).toList();
     }
 
-    private void saveStep(Long runId, int stepNo, String stepType, String toolName, Object input, Object output, boolean success, String errorMessage, long latencyMs) {
-        AgentRunStep step = new AgentRunStep();
-        step.setRunId(runId);
-        step.setStepNo(stepNo);
-        step.setStepType(stepType);
-        step.setToolName(toolName);
-        step.setInputJson(toJson(input));
-        step.setOutputJson(toJson(output));
-        step.setLatencyMs(latencyMs);
-        step.setSuccess(success);
-        step.setErrorMessage(errorMessage);
-        agentRunStepRepository.save(step);
+    @Transactional(readOnly = true)
+    public AgentGraphResponse getGraph(Long userId, Long runId) {
+        AgentRun run = getRequiredRun(userId, runId);
+        return agentGraphService.buildGraph(run, agentRunStepRepository.findByRunIdOrderByStepNoAsc(runId));
     }
 
-    private String toJson(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception ex) {
-            return String.valueOf(value);
-        }
+    private AgentRun getRequiredRun(Long userId, Long runId) {
+        return agentRunRepository.findByIdAndUserId(runId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND));
     }
 
     private AgentRunStepResponse toStepResponse(AgentRunStep step) {
@@ -170,13 +180,38 @@ public class AgentRunService {
                 .id(step.getId())
                 .stepNo(step.getStepNo())
                 .stepType(step.getStepType())
+                .nodeId(step.getNodeId())
+                .nodeLabel(step.getNodeLabel())
                 .toolName(step.getToolName())
+                .attemptNo(step.getAttemptNo())
+                .parentStepId(step.getParentStepId())
                 .inputJson(step.getInputJson())
                 .outputJson(step.getOutputJson())
+                .stateBeforeJson(step.getStateBeforeJson())
+                .stateAfterJson(step.getStateAfterJson())
+                .observationJson(step.getObservationJson())
                 .latencyMs(step.getLatencyMs())
+                .modelName(step.getModelName())
+                .promptVersion(step.getPromptVersion())
                 .success(step.getSuccess())
                 .errorMessage(step.getErrorMessage())
                 .createdAt(step.getCreatedAt())
                 .build();
+    }
+
+    private void markRunFailed(AgentRun run, String errorMessage) {
+        run.setStatus("FAILED");
+        run.setErrorMessage(errorMessage);
+        run.setFinishedAt(LocalDateTime.now());
+        run.setRequiresHuman(false);
+        run.setResumeToken(null);
+        if (run.getCreatedAt() != null) {
+            run.setTotalLatencyMs(Math.max(0L, Duration.between(run.getCreatedAt(), LocalDateTime.now()).toMillis()));
+        }
+        agentRunRepository.save(run);
+    }
+
+    private String normalizeOrDefault(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value.trim().toUpperCase();
     }
 }

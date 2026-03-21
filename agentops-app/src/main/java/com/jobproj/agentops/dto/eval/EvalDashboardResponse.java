@@ -17,6 +17,8 @@ public class EvalDashboardResponse {
     private int completedRunCount;
     private int failedResultCount;
     private double avgScore;
+    private double avgGroundingScore;
+    private double avgCitationScore;
     private double passRate;
     private long avgLatencyMs;
     private List<EvalFailureSampleResponse> latestFailedSamples;

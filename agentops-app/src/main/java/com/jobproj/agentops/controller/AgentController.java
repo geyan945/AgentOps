@@ -2,8 +2,10 @@ package com.jobproj.agentops.controller;
 
 import com.jobproj.agentops.agent.AgentRunService;
 import com.jobproj.agentops.common.ApiResponse;
+import com.jobproj.agentops.dto.agent.AgentGraphResponse;
 import com.jobproj.agentops.dto.agent.AgentRunRequest;
 import com.jobproj.agentops.dto.agent.AgentRunResponse;
+import com.jobproj.agentops.dto.agent.AgentRunResumeRequest;
 import com.jobproj.agentops.dto.agent.AgentRunStepResponse;
 import com.jobproj.agentops.dto.agent.ToolInfoResponse;
 import com.jobproj.agentops.security.SecurityUtils;
@@ -37,8 +39,18 @@ public class AgentController {
         return ApiResponse.success(agentRunService.getRun(SecurityUtils.currentUserId(), id));
     }
 
+    @GetMapping("/agent/runs/{id}/graph")
+    public ApiResponse<AgentGraphResponse> getGraph(@PathVariable Long id) {
+        return ApiResponse.success(agentRunService.getGraph(SecurityUtils.currentUserId(), id));
+    }
+
     @GetMapping("/agent/runs/{id}/steps")
     public ApiResponse<List<AgentRunStepResponse>> listSteps(@PathVariable Long id) {
         return ApiResponse.success(agentRunService.listSteps(SecurityUtils.currentUserId(), id));
+    }
+
+    @PostMapping("/agent/runs/{id}/resume")
+    public ApiResponse<AgentRunResponse> resume(@PathVariable Long id, @RequestBody @Valid AgentRunResumeRequest request) {
+        return ApiResponse.success(agentRunService.resume(SecurityUtils.currentUserId(), id, request));
     }
 }

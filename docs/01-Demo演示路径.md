@@ -1,93 +1,84 @@
-# AgentOps Demo 演示路径
+# AgentOps 2.0 Demo 演示路径
 
-## 1. 目标
+## 目标
 
-用 5 到 10 分钟展示：
+用 8 到 10 分钟展示下面这条完整链路：
 
 ```text
-登录 -> 新建会话 -> MCP 初始化/工具列表 -> 发起 Agent Run -> 回看 Trace
--> 发起 Eval -> 看 Dashboard / 失败样本
+登录
+ -> 新建会话
+ -> 创建 Agent Run
+ -> 看 LangGraph graph trace
+ -> 触发 human approval
+ -> 恢复执行
+ -> 看 Eval dashboard
 ```
 
-## 2. 前置条件
+## 演示前准备
 
-- AISmartQA 已经有知识库与文档数据
-- AgentOps 服务启动在 `18084`
-- MySQL / Redis / RabbitMQ / ES 已可用
+- Java `agentops-app` 启动在 `18084`
+- Python `agentops-runtime-py` 启动在 `18085`
+- 前端 `agentops-web` 启动在 `5173`
+- MySQL / Redis / RabbitMQ / ES 可用
+- AISmartQA 文档与知识库数据可访问
 
-## 3. 固定演示顺序
+## 演示步骤
 
-### Step 1：注册登录
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
+### Step 1：登录工作台
 
-讲法：
-- Agent 平台不是脚本，先把用户和安全边界立住
-- 后续 session、run、trace、eval 都按用户隔离
+- 页面：`agentops-web`
+- 说明：
+  - 项目不是脚本，而是完整 control plane + runtime + workspace
+  - 登录后所有 session / run / approval / eval 都按用户隔离
 
-### Step 2：新建会话
-- `POST /api/sessions`
-- `GET /api/sessions`
-- `GET /api/sessions/{id}/summary`
+### Step 2：创建会话
 
-讲法：
-- 会话是平台最外层业务边界
-- 摘要缓存用于支撑后续上下文压缩和更长会话
+- 页面左侧 `Session` 区域创建一个新会话
+- 说明：
+  - Java control plane 负责会话和消息持久化
+  - 后续 memory summary 与 run trace 都挂在 session 上
 
-### Step 3：展示 MCP 第一版
-- `POST /api/mcp/initialize`
-- `GET /api/mcp/tools`
-- `POST /api/mcp/tools/call`
+### Step 3：启动一个知识检索型 run
 
-讲法：
-- 当前不是空喊 MCP，而是已经有最小可用协议链
-- 主系统既能本地调工具，也能走远程工具模式
+- 输入：`请总结 AgentOps 的工具调用链路`
+- 说明：
+  - Java 只负责创建 run 和触发 runtime
+  - Python runtime 会拉上下文，执行 `intake -> memory -> supervisor -> knowledge_researcher -> reviewer -> finalize`
 
-### Step 4：跑一个统计类问题
-- `POST /api/agent/runs`
-- message: `please count my sessions`
+### Step 4：展示 graph 和 step trace
 
-讲法：
-- Planner 会选 `sql_query_remote`
-- 说明 Agent 不只是问答，也能走结构化数据工具
+- 页面中部看 step trace
+- 页面右侧看 graph
+- 说明：
+  - 这是 `LangGraph` 风格的状态图，而不是单轮 `prompt -> answer`
+  - 每个节点与工具调用都回写到 Java 的 `run/step`
 
-### Step 5：跑一个文档读取问题
-- `POST /api/agent/runs`
-- message: `show document 23`
+### Step 5：触发人工审批
 
-讲法：
-- Planner 会选 `doc_fetch`
-- 适合说明工具抽象和明确参数生成
+- 输入：`统计所有运行状态并导出全量结果`
+- 说明：
+  - runtime 会识别为高风险 SQL 场景
+  - graph 进入 `human_approval`
+  - Java 生成 `agent_human_task`
 
-### Step 6：跑一个知识库检索问题
-- `POST /api/agent/runs`
-- message: `semantic vector retrieval`
+### Step 6：在 Approval Inbox 里 approve / reject
 
-讲法：
-- Planner 会选 `kb_search_remote`
-- 这个工具复用了 AISmartQA 的知识库和 ES 索引数据
+- 页面：`Approvals`
+- 说明：
+  - 这是 `human-in-the-loop`
+  - 审批通过后 run 从 pause 状态恢复
+  - 审批拒绝后系统给出受限答案，不继续执行
 
-### Step 7：回看 Trace
-- `GET /api/agent/runs/{id}`
-- `GET /api/agent/runs/{id}/steps`
+### Step 7：看 Eval Dashboard
 
-讲法：
-- 这里能看到 PLAN / TOOL_CALL / FINAL_ANSWER 三步
-- 这就是 Agent 可观测性的核心
+- 页面：`Eval`
+- 说明：
+  - 评测不只看是否答出来
+  - 现在展示 `route / grounding / citation / latency`
+  - 这是工程化 agent 的质量闭环
 
-### Step 8：跑 Eval
-- `POST /api/evals/datasets`
-- `POST /api/evals/runs`
-- `GET /api/evals/dashboard`
-- `GET /api/evals/failures`
+## 演示时的固定讲法
 
-讲法：
-- AgentOps 不只会执行，还能批量评测
-- 评测走 RabbitMQ 异步链，不阻塞主聊天链路
-
-## 4. 演示重点
-
-- 这不是普通 RAG，而是多工具智能体平台
-- 工具调用可追踪、可解释、可扩展
-- 已经具备 MCP 第一版、异步评测和平台运维视角
+- “AgentOps 2.0 把 Java 保留为 control plane，把 Python LangGraph 做成 runtime。”
+- “真正的 agent 味不在于调模型，而在于 graph、tool orchestration、review/replan、human-in-the-loop、memory 和 eval。”
+- “我没有把 Java 推倒重来，而是把它升级成系统记录源和工具平面，这更像企业真实落地方式。”

@@ -26,9 +26,26 @@ public class EvalCase {
     @Column(name = "expected_tool", length = 128)
     private String expectedTool;
 
+    @Column(name = "expected_route", length = 64)
+    private String expectedRoute;
+
     @Lob
     @Column(name = "expected_keywords_json", columnDefinition = "MEDIUMTEXT")
     private String expectedKeywordsJson;
+
+    @Lob
+    @Column(name = "expected_node_path_json", columnDefinition = "MEDIUMTEXT")
+    private String expectedNodePathJson;
+
+    @Column(name = "expected_approval_policy", length = 64)
+    private String expectedApprovalPolicy;
+
+    @Column(name = "expected_citation_min")
+    private Integer expectedCitationMin;
+
+    @Lob
+    @Column(name = "expected_artifact_types_json", columnDefinition = "MEDIUMTEXT")
+    private String expectedArtifactTypesJson;
 
     @Lob
     @Column(name = "expected_reference_json", columnDefinition = "MEDIUMTEXT")

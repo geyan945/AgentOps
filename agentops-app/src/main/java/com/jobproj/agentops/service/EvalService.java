@@ -2,11 +2,7 @@ package com.jobproj.agentops.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jobproj.agentops.agent.AgentAnswerService;
-import com.jobproj.agentops.agent.AgentPlannerService;
 import com.jobproj.agentops.agent.EvalCaseExecutionResult;
-import com.jobproj.agentops.agent.PlannerResult;
-import com.jobproj.agentops.agent.ToolCallPlan;
 import com.jobproj.agentops.common.BusinessException;
 import com.jobproj.agentops.common.ErrorCode;
 import com.jobproj.agentops.dto.eval.CreateEvalDatasetRequest;
@@ -17,23 +13,26 @@ import com.jobproj.agentops.dto.eval.EvalDatasetResponse;
 import com.jobproj.agentops.dto.eval.EvalFailureSampleResponse;
 import com.jobproj.agentops.dto.eval.EvalResultResponse;
 import com.jobproj.agentops.dto.eval.EvalRunResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeStartRunRequest;
+import com.jobproj.agentops.entity.AgentRun;
+import com.jobproj.agentops.entity.AgentRunStep;
+import com.jobproj.agentops.entity.AgentSession;
 import com.jobproj.agentops.entity.EvalCase;
 import com.jobproj.agentops.entity.EvalDataset;
 import com.jobproj.agentops.entity.EvalResult;
 import com.jobproj.agentops.entity.EvalRun;
 import com.jobproj.agentops.mq.EvalCaseMessage;
 import com.jobproj.agentops.mq.EvalRunProducer;
+import com.jobproj.agentops.repository.AgentRunRepository;
+import com.jobproj.agentops.repository.AgentRunStepRepository;
+import com.jobproj.agentops.repository.AgentSessionRepository;
 import com.jobproj.agentops.repository.EvalCaseRepository;
 import com.jobproj.agentops.repository.EvalDatasetRepository;
 import com.jobproj.agentops.repository.EvalResultRepository;
 import com.jobproj.agentops.repository.EvalRunRepository;
-import com.jobproj.agentops.tool.ToolContext;
-import com.jobproj.agentops.tool.ToolExecutor;
-import com.jobproj.agentops.tool.ToolPermissionService;
-import com.jobproj.agentops.tool.ToolRegistry;
-import com.jobproj.agentops.tool.ToolResult;
+import com.jobproj.agentops.runtime.RuntimeClient;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -42,8 +41,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -56,15 +57,12 @@ public class EvalService {
     private final EvalResultRepository evalResultRepository;
     private final EvalRunProducer evalRunProducer;
     private final RateLimitService rateLimitService;
-    private final AgentPlannerService agentPlannerService;
-    private final AgentAnswerService agentAnswerService;
-    private final ToolRegistry toolRegistry;
-    private final ToolPermissionService toolPermissionService;
     private final EvalScoringService evalScoringService;
     private final ObjectMapper objectMapper;
-
-    @Value("${agent.max-tool-calls:2}")
-    private int maxToolCalls;
+    private final RuntimeClient runtimeClient;
+    private final AgentSessionRepository agentSessionRepository;
+    private final AgentRunRepository agentRunRepository;
+    private final AgentRunStepRepository agentRunStepRepository;
 
     @Transactional
     public EvalDatasetResponse createDataset(Long userId, CreateEvalDatasetRequest request) {
@@ -72,7 +70,7 @@ public class EvalService {
         dataset.setName(request.getName());
         dataset.setDescription(request.getDescription());
         dataset.setCreatedBy(userId);
-        final EvalDataset savedDataset = evalDatasetRepository.save(dataset);
+        EvalDataset savedDataset = evalDatasetRepository.save(dataset);
 
         List<EvalCase> cases = new ArrayList<>();
         request.getCases().forEach(item -> {
@@ -80,7 +78,12 @@ public class EvalService {
             evalCase.setDatasetId(savedDataset.getId());
             evalCase.setQuestion(item.getQuestion());
             evalCase.setExpectedTool(item.getExpectedTool());
+            evalCase.setExpectedRoute(item.getExpectedRoute());
             evalCase.setExpectedKeywordsJson(toJson(item.getExpectedKeywords()));
+            evalCase.setExpectedNodePathJson(toJson(item.getExpectedNodePath()));
+            evalCase.setExpectedApprovalPolicy(item.getExpectedApprovalPolicy());
+            evalCase.setExpectedCitationMin(item.getExpectedCitationMin());
+            evalCase.setExpectedArtifactTypesJson(toJson(item.getExpectedArtifactTypes()));
             cases.add(evalCase);
         });
         evalCaseRepository.saveAll(cases);
@@ -89,7 +92,9 @@ public class EvalService {
 
     @Transactional(readOnly = true)
     public List<EvalDatasetResponse> listDatasets(Long userId) {
-        return evalDatasetRepository.findByCreatedByOrderByIdDesc(userId).stream().map(dataset -> toDatasetResponse(dataset, null)).toList();
+        return evalDatasetRepository.findByCreatedByOrderByIdDesc(userId).stream()
+                .map(dataset -> toDatasetResponse(dataset, null))
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -127,7 +132,9 @@ public class EvalService {
     @Transactional(readOnly = true)
     public List<EvalResultResponse> listResults(Long userId, Long runId) {
         getRequiredRun(userId, runId);
-        return evalResultRepository.findByEvalRunIdOrderByIdAsc(runId).stream().map(this::toResultResponse).toList();
+        return evalResultRepository.findByEvalRunIdOrderByIdAsc(runId).stream()
+                .map(this::toResultResponse)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -149,6 +156,8 @@ public class EvalService {
                 .completedRunCount(completedRunCount)
                 .failedResultCount(failedResultCount)
                 .avgScore(avgScore)
+                .avgGroundingScore(results.isEmpty() ? 0D : results.stream().map(EvalResult::getGroundingScore).filter(v -> v != null).mapToDouble(Double::doubleValue).average().orElse(0D))
+                .avgCitationScore(results.isEmpty() ? 0D : results.stream().map(EvalResult::getCitationScore).filter(v -> v != null).mapToDouble(Double::doubleValue).average().orElse(0D))
                 .passRate(passRate)
                 .avgLatencyMs(avgLatencyMs)
                 .latestFailedSamples(listFailedSamples(userId, 10))
@@ -199,9 +208,11 @@ public class EvalService {
             refreshRunStats(evalRun.getId());
             return;
         }
+
         try {
-            EvalCaseExecutionResult executionResult = executeCase(message.getUserId(), evalCase.getQuestion());
+            EvalCaseExecutionResult executionResult = executeCase(message.getUserId(), evalCase);
             EvalScoringService.ScoreOutcome scoreOutcome = evalScoringService.score(evalCase, executionResult);
+
             EvalResult evalResult = new EvalResult();
             evalResult.setEvalRunId(evalRun.getId());
             evalResult.setCaseId(evalCase.getId());
@@ -209,7 +220,18 @@ public class EvalService {
             evalResult.setAnswerText(executionResult.getAnswerText());
             evalResult.setSuccess(scoreOutcome.isSuccess());
             evalResult.setScore(scoreOutcome.getScore());
+            evalResult.setRouteScore(scoreOutcome.getRouteScore());
+            evalResult.setGroundingScore(scoreOutcome.getGroundingScore());
+            evalResult.setCitationScore(scoreOutcome.getCitationScore());
+            evalResult.setFinalScore(scoreOutcome.getFinalScore());
+            evalResult.setRetryCount(executionResult.getRetryCount());
             evalResult.setReason(scoreOutcome.getReason());
+            evalResult.setToolTraceJson(toJson(executionResult.getToolTrace()));
+            evalResult.setNodePathJson(toJson(executionResult.getNodePath()));
+            evalResult.setApprovalTriggered(executionResult.getApprovalTriggered());
+            evalResult.setApprovalDecision(executionResult.getApprovalDecision());
+            evalResult.setJudgeModel(scoreOutcome.getJudgeModel());
+            evalResult.setJudgeReason(scoreOutcome.getJudgeReason());
             evalResult.setLatencyMs(executionResult.getLatencyMs());
             evalResultRepository.save(evalResult);
         } catch (Exception ex) {
@@ -218,33 +240,104 @@ public class EvalService {
         refreshRunStats(evalRun.getId());
     }
 
-    private EvalCaseExecutionResult executeCase(Long userId, String question) {
+    private EvalCaseExecutionResult executeCase(Long userId, EvalCase evalCase) {
         Instant start = Instant.now();
-        PlannerResult plannerResult = agentPlannerService.plan(question, toolRegistry.listTools());
-        List<ToolResult> toolResults = new ArrayList<>();
-        List<String> actualTools = new ArrayList<>();
-        if ("CALL_TOOLS".equalsIgnoreCase(plannerResult.getDecision()) && plannerResult.getToolCalls() != null) {
-            int toolCallCount = 0;
-            for (ToolCallPlan toolCallPlan : plannerResult.getToolCalls()) {
-                if (toolCallCount >= maxToolCalls) {
-                    break;
-                }
-                if (!toolPermissionService.canUse(userId, toolCallPlan.getToolName())) {
-                    throw new BusinessException(ErrorCode.FORBIDDEN, "当前用户无权限调用工具: " + toolCallPlan.getToolName());
-                }
-                ToolExecutor toolExecutor = toolRegistry.getRequired(toolCallPlan.getToolName());
-                ToolResult toolResult = toolExecutor.execute(toolCallPlan.getArguments(), ToolContext.builder().userId(userId).build());
-                toolResults.add(toolResult);
-                actualTools.add(toolExecutor.getName());
-                toolCallCount++;
-            }
+        AgentSession session = new AgentSession();
+        session.setUserId(userId);
+        session.setTitle(buildEvalSessionTitle(evalCase.getQuestion()));
+        session.setStatus("ACTIVE");
+        session = agentSessionRepository.save(session);
+
+        AgentRun run = new AgentRun();
+        run.setSessionId(session.getId());
+        run.setUserId(userId);
+        run.setUserInput(evalCase.getQuestion());
+        run.setStatus("QUEUED");
+        run.setRuntimeType("LANGGRAPH");
+        run.setExecutionMode("EVAL");
+        run.setApprovalPolicy(resolveApprovalPolicy(evalCase));
+        run.setGraphName("enterprise-copilot");
+        run.setGraphVersion("v2.1");
+        run.setCurrentNode("intake_guardrail");
+        run = agentRunRepository.save(run);
+
+        try {
+            RuntimeCommandResponse ignored = runtimeClient.startRun(RuntimeStartRunRequest.builder()
+                    .runId(run.getId())
+                    .sessionId(run.getSessionId())
+                    .userId(userId)
+                    .userInput(evalCase.getQuestion())
+                    .executionMode(run.getExecutionMode())
+                    .approvalPolicy(run.getApprovalPolicy())
+                    .waitForCompletion(true)
+                    .build());
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.RUNTIME_UNAVAILABLE, "Eval runtime 执行失败: " + ex.getMessage());
         }
+
+        AgentRun refreshed = agentRunRepository.findById(run.getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND));
+        List<AgentRunStep> steps = agentRunStepRepository.findByRunIdOrderByStepNoAsc(run.getId());
+        return buildExecutionResult(refreshed, steps, Duration.between(start, Instant.now()).toMillis());
+    }
+
+    private EvalCaseExecutionResult buildExecutionResult(AgentRun run, List<AgentRunStep> steps, long fallbackLatencyMs) {
+        List<AgentRunStep> toolSteps = steps.stream()
+                .filter(step -> "TOOL_CALL".equalsIgnoreCase(step.getStepType()) && StringUtils.hasText(step.getToolName()))
+                .toList();
+        List<AgentRunStep> graphSteps = steps.stream()
+                .filter(step -> !"TOOL_CALL".equalsIgnoreCase(step.getStepType()) && StringUtils.hasText(step.getNodeId()))
+                .toList();
+
+        Set<String> tools = new LinkedHashSet<>();
+        toolSteps.forEach(step -> tools.add(step.getToolName()));
+        Set<String> nodePath = new LinkedHashSet<>();
+        graphSteps.forEach(step -> nodePath.add(step.getNodeId()));
+
+        String route = graphSteps.stream()
+                .map(step -> readStringField(step.getObservationJson(), "route"))
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElseGet(() -> graphSteps.stream()
+                        .map(step -> readStringField(step.getStateAfterJson(), "route"))
+                        .filter(StringUtils::hasText)
+                        .findFirst()
+                        .orElse("unknown"));
+
+        String approvalDecision = graphSteps.stream()
+                .map(step -> readStringField(step.getStateAfterJson(), "humanDecision"))
+                .filter(StringUtils::hasText)
+                .reduce((first, second) -> second)
+                .orElse(null);
+
+        int retryCount = (int) graphSteps.stream()
+                .filter(step -> "REVIEW".equalsIgnoreCase(step.getStepType()))
+                .map(step -> readStringField(step.getObservationJson(), "decision"))
+                .filter("replan"::equalsIgnoreCase)
+                .count();
+
+        List<Map<String, Object>> artifacts = readObjectList(run.getArtifactsJson());
+        List<Map<String, Object>> citations = readObjectList(run.getCitationsJson());
+        List<String> artifactTypes = artifacts.stream()
+                .map(item -> String.valueOf(item.get("type")))
+                .filter(StringUtils::hasText)
+                .toList();
+
         return EvalCaseExecutionResult.builder()
-                .decision(plannerResult.getDecision())
-                .actualTool(actualTools.isEmpty() ? "ANSWER_DIRECTLY" : String.join(",", actualTools))
-                .answerText(agentAnswerService.answer(question, toolResults))
-                .latencyMs(Duration.between(start, Instant.now()).toMillis())
-                .success(true)
+                .decision(run.getStatus())
+                .actualTool(tools.isEmpty() ? "ANSWER_DIRECTLY" : String.join(",", tools))
+                .answerText(run.getFinalAnswer())
+                .latencyMs(run.getTotalLatencyMs() == null ? fallbackLatencyMs : run.getTotalLatencyMs())
+                .success("SUCCEEDED".equalsIgnoreCase(run.getStatus()))
+                .errorMessage(run.getErrorMessage())
+                .retryCount(retryCount)
+                .citationCount(citations.size())
+                .route(route)
+                .approvalTriggered(nodePath.contains("human_approval"))
+                .approvalDecision(StringUtils.hasText(approvalDecision) ? approvalDecision.toUpperCase() : (nodePath.contains("human_approval") ? "PENDING" : "NONE"))
+                .nodePath(List.copyOf(nodePath))
+                .artifactTypes(artifactTypes)
+                .toolTrace(new ArrayList<>(tools))
                 .build();
     }
 
@@ -256,13 +349,25 @@ public class EvalService {
         evalResult.setAnswerText(null);
         evalResult.setSuccess(false);
         evalResult.setScore(0D);
+        evalResult.setRouteScore(0D);
+        evalResult.setGroundingScore(0D);
+        evalResult.setCitationScore(0D);
+        evalResult.setFinalScore(0D);
+        evalResult.setRetryCount(0);
         evalResult.setReason("执行失败: " + errorMessage);
+        evalResult.setToolTraceJson("[]");
+        evalResult.setNodePathJson("[]");
+        evalResult.setApprovalTriggered(false);
+        evalResult.setApprovalDecision("NONE");
+        evalResult.setJudgeModel("rule-keyword");
+        evalResult.setJudgeReason("执行失败，未进入 judge");
         evalResult.setLatencyMs(0L);
         evalResultRepository.save(evalResult);
     }
 
     private void refreshRunStats(Long evalRunId) {
-        EvalRun evalRun = evalRunRepository.findById(evalRunId).orElseThrow(() -> new BusinessException(ErrorCode.EVAL_RUN_NOT_FOUND));
+        EvalRun evalRun = evalRunRepository.findById(evalRunId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.EVAL_RUN_NOT_FOUND));
         List<EvalResult> results = evalResultRepository.findByEvalRunIdOrderByIdAsc(evalRunId);
         evalRun.setFinishedCases(results.size());
         evalRun.setPassedCases((int) results.stream().filter(result -> Boolean.TRUE.equals(result.getSuccess())).count());
@@ -277,28 +382,138 @@ public class EvalService {
     }
 
     private EvalDataset getRequiredDataset(Long userId, Long datasetId) {
-        return evalDatasetRepository.findByIdAndCreatedBy(datasetId, userId).orElseThrow(() -> new BusinessException(ErrorCode.EVAL_DATASET_NOT_FOUND));
+        return evalDatasetRepository.findByIdAndCreatedBy(datasetId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.EVAL_DATASET_NOT_FOUND));
     }
 
     private EvalRun getRequiredRun(Long userId, Long runId) {
-        return evalRunRepository.findByIdAndCreatedBy(runId, userId).orElseThrow(() -> new BusinessException(ErrorCode.EVAL_RUN_NOT_FOUND));
+        return evalRunRepository.findByIdAndCreatedBy(runId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.EVAL_RUN_NOT_FOUND));
     }
 
     private EvalDatasetResponse toDatasetResponse(EvalDataset dataset, List<EvalCase> cases) {
         List<EvalCase> actualCases = cases == null ? evalCaseRepository.findByDatasetIdOrderByIdAsc(dataset.getId()) : cases;
-        return EvalDatasetResponse.builder().id(dataset.getId()).name(dataset.getName()).description(dataset.getDescription()).caseCount(actualCases.size()).createdAt(dataset.getCreatedAt()).cases(actualCases.stream().map(this::toCaseResponse).toList()).build();
+        return EvalDatasetResponse.builder()
+                .id(dataset.getId())
+                .name(dataset.getName())
+                .description(dataset.getDescription())
+                .caseCount(actualCases.size())
+                .createdAt(dataset.getCreatedAt())
+                .cases(actualCases.stream().map(this::toCaseResponse).toList())
+                .build();
     }
 
     private EvalCaseResponse toCaseResponse(EvalCase evalCase) {
-        return EvalCaseResponse.builder().id(evalCase.getId()).question(evalCase.getQuestion()).expectedTool(evalCase.getExpectedTool()).expectedKeywords(readKeywords(evalCase.getExpectedKeywordsJson())).build();
+        return EvalCaseResponse.builder()
+                .id(evalCase.getId())
+                .question(evalCase.getQuestion())
+                .expectedTool(evalCase.getExpectedTool())
+                .expectedRoute(evalCase.getExpectedRoute())
+                .expectedKeywords(readStringList(evalCase.getExpectedKeywordsJson()))
+                .expectedNodePath(readStringList(evalCase.getExpectedNodePathJson()))
+                .expectedApprovalPolicy(evalCase.getExpectedApprovalPolicy())
+                .expectedCitationMin(evalCase.getExpectedCitationMin())
+                .expectedArtifactTypes(readStringList(evalCase.getExpectedArtifactTypesJson()))
+                .build();
     }
 
     private EvalRunResponse toRunResponse(EvalRun evalRun) {
-        return EvalRunResponse.builder().id(evalRun.getId()).datasetId(evalRun.getDatasetId()).status(evalRun.getStatus()).totalCases(evalRun.getTotalCases()).finishedCases(evalRun.getFinishedCases()).passedCases(evalRun.getPassedCases()).avgLatencyMs(evalRun.getAvgLatencyMs()).createdAt(evalRun.getCreatedAt()).finishedAt(evalRun.getFinishedAt()).build();
+        return EvalRunResponse.builder()
+                .id(evalRun.getId())
+                .datasetId(evalRun.getDatasetId())
+                .status(evalRun.getStatus())
+                .totalCases(evalRun.getTotalCases())
+                .finishedCases(evalRun.getFinishedCases())
+                .passedCases(evalRun.getPassedCases())
+                .avgLatencyMs(evalRun.getAvgLatencyMs())
+                .createdAt(evalRun.getCreatedAt())
+                .finishedAt(evalRun.getFinishedAt())
+                .build();
     }
 
     private EvalResultResponse toResultResponse(EvalResult evalResult) {
-        return EvalResultResponse.builder().id(evalResult.getId()).caseId(evalResult.getCaseId()).actualTool(evalResult.getActualTool()).answerText(evalResult.getAnswerText()).success(evalResult.getSuccess()).score(evalResult.getScore()).reason(evalResult.getReason()).latencyMs(evalResult.getLatencyMs()).createdAt(evalResult.getCreatedAt()).build();
+        return EvalResultResponse.builder()
+                .id(evalResult.getId())
+                .caseId(evalResult.getCaseId())
+                .actualTool(evalResult.getActualTool())
+                .answerText(evalResult.getAnswerText())
+                .success(evalResult.getSuccess())
+                .score(evalResult.getScore())
+                .routeScore(evalResult.getRouteScore())
+                .groundingScore(evalResult.getGroundingScore())
+                .citationScore(evalResult.getCitationScore())
+                .finalScore(evalResult.getFinalScore())
+                .retryCount(evalResult.getRetryCount())
+                .reason(evalResult.getReason())
+                .toolTraceJson(evalResult.getToolTraceJson())
+                .nodePathJson(evalResult.getNodePathJson())
+                .approvalTriggered(evalResult.getApprovalTriggered())
+                .approvalDecision(evalResult.getApprovalDecision())
+                .judgeModel(evalResult.getJudgeModel())
+                .judgeReason(evalResult.getJudgeReason())
+                .latencyMs(evalResult.getLatencyMs())
+                .createdAt(evalResult.getCreatedAt())
+                .build();
+    }
+
+    private String buildEvalSessionTitle(String question) {
+        if (!StringUtils.hasText(question)) {
+            return "Eval Run";
+        }
+        String trimmed = question.trim();
+        return trimmed.length() > 24 ? "Eval " + trimmed.substring(0, 24) + "..." : "Eval " + trimmed;
+    }
+
+    private String resolveApprovalPolicy(EvalCase evalCase) {
+        if (!StringUtils.hasText(evalCase.getExpectedApprovalPolicy())) {
+            return "AUTO_APPROVE";
+        }
+        String normalized = evalCase.getExpectedApprovalPolicy().trim().toUpperCase();
+        if ("APPROVE".equals(normalized)) {
+            return "AUTO_APPROVE";
+        }
+        if ("REJECT".equals(normalized)) {
+            return "AUTO_REJECT";
+        }
+        if ("NONE".equals(normalized)) {
+            return "MANUAL";
+        }
+        return normalized;
+    }
+
+    private String readStringField(String json, String fieldName) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {}).get(fieldName) == null
+                    ? null
+                    : String.valueOf(objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {}).get(fieldName));
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private List<Map<String, Object>> readObjectList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception ex) {
+            return List.of();
+        }
+    }
+
+    private List<String> readStringList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     private String toJson(Object value) {
@@ -309,17 +524,6 @@ public class EvalService {
             return objectMapper.writeValueAsString(value);
         } catch (Exception ex) {
             return null;
-        }
-    }
-
-    private List<String> readKeywords(String json) {
-        if (!StringUtils.hasText(json)) {
-            return List.of();
-        }
-        try {
-            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
-        } catch (Exception ex) {
-            return List.of();
         }
     }
 }

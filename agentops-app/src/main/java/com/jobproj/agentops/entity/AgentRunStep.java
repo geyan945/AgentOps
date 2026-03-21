@@ -25,8 +25,20 @@ public class AgentRunStep {
     @Column(name = "step_type", nullable = false, length = 32)
     private String stepType;
 
+    @Column(name = "node_id", length = 64)
+    private String nodeId;
+
+    @Column(name = "node_label", length = 128)
+    private String nodeLabel;
+
     @Column(name = "tool_name", length = 64)
     private String toolName;
+
+    @Column(name = "attempt_no")
+    private Integer attemptNo;
+
+    @Column(name = "parent_step_id")
+    private Long parentStepId;
 
     @Lob
     @Column(name = "input_json", columnDefinition = "MEDIUMTEXT")
@@ -36,8 +48,26 @@ public class AgentRunStep {
     @Column(name = "output_json", columnDefinition = "MEDIUMTEXT")
     private String outputJson;
 
+    @Lob
+    @Column(name = "state_before_json", columnDefinition = "MEDIUMTEXT")
+    private String stateBeforeJson;
+
+    @Lob
+    @Column(name = "state_after_json", columnDefinition = "MEDIUMTEXT")
+    private String stateAfterJson;
+
+    @Lob
+    @Column(name = "observation_json", columnDefinition = "MEDIUMTEXT")
+    private String observationJson;
+
     @Column(name = "latency_ms")
     private Long latencyMs;
+
+    @Column(name = "model_name", length = 64)
+    private String modelName;
+
+    @Column(name = "prompt_version", length = 64)
+    private String promptVersion;
 
     @Column(nullable = false)
     private Boolean success = Boolean.TRUE;
@@ -52,5 +82,8 @@ public class AgentRunStep {
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
+        if (this.attemptNo == null) {
+            this.attemptNo = 1;
+        }
     }
 }

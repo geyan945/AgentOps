@@ -8,4 +8,6 @@ import java.util.List;
 public interface AgentRunStepRepository extends JpaRepository<AgentRunStep, Long> {
 
     List<AgentRunStep> findByRunIdOrderByStepNoAsc(Long runId);
+
+    long countByRunId(Long runId);
 }

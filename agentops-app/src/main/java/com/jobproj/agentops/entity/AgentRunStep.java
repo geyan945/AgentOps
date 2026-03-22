@@ -34,11 +34,34 @@ public class AgentRunStep {
     @Column(name = "tool_name", length = 64)
     private String toolName;
 
+    @Column(name = "event_sequence")
+    private Integer eventSequence;
+
     @Column(name = "attempt_no")
     private Integer attemptNo;
 
     @Column(name = "parent_step_id")
     private Long parentStepId;
+
+    @Column(name = "skill_name", length = 64)
+    private String skillName;
+
+    @Column(name = "skill_type", length = 64)
+    private String skillType;
+
+    @Column(name = "risk_level", length = 32)
+    private String riskLevel;
+
+    @Column(name = "approval_policy", length = 32)
+    private String approvalPolicy;
+
+    @Lob
+    @Column(name = "approval_reason", columnDefinition = "MEDIUMTEXT")
+    private String approvalReason;
+
+    @Lob
+    @Column(name = "retry_reason", columnDefinition = "MEDIUMTEXT")
+    private String retryReason;
 
     @Lob
     @Column(name = "input_json", columnDefinition = "MEDIUMTEXT")
@@ -59,6 +82,10 @@ public class AgentRunStep {
     @Lob
     @Column(name = "observation_json", columnDefinition = "MEDIUMTEXT")
     private String observationJson;
+
+    @Lob
+    @Column(name = "cost_usage_json", columnDefinition = "MEDIUMTEXT")
+    private String costUsageJson;
 
     @Column(name = "latency_ms")
     private Long latencyMs;

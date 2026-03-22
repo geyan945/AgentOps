@@ -68,6 +68,17 @@ public class EvalResult {
     @Column(name = "approval_decision", length = 64)
     private String approvalDecision;
 
+    @Lob
+    @Column(name = "skills_used_json", columnDefinition = "MEDIUMTEXT")
+    private String skillsUsedJson;
+
+    @Column(name = "replay_recovered")
+    private Boolean replayRecovered;
+
+    @Lob
+    @Column(name = "cost_usage_json", columnDefinition = "MEDIUMTEXT")
+    private String costUsageJson;
+
     @Column(name = "judge_model", length = 128)
     private String judgeModel;
 

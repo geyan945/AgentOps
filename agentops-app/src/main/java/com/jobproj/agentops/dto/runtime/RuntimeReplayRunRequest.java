@@ -9,12 +9,9 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class RuntimeCommandResponse {
+public class RuntimeReplayRunRequest {
 
-    private boolean accepted;
-    private String status;
-    private String currentNode;
+    private Long runId;
     private Integer checkpointVersion;
-    private String resumeToken;
-    private String orchestrationMode;
+    private boolean waitForCompletion;
 }

@@ -16,6 +16,7 @@ public class AgentGraphResponse {
     private Long runId;
     private String graphName;
     private String graphVersion;
+    private String orchestrationMode;
     private String currentNode;
     private String status;
     private List<AgentGraphNodeResponse> nodes;

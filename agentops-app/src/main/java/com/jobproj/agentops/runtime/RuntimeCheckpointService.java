@@ -41,11 +41,13 @@ public class RuntimeCheckpointService {
         checkpoint.setSessionId(request.getSessionId() == null ? run.getSessionId() : request.getSessionId());
         checkpoint.setStatus(request.getStatus());
         checkpoint.setCurrentNode(request.getCurrentNode());
+        checkpoint.setOrchestrationMode(request.getOrchestrationMode());
         checkpoint.setCheckpointVersion(nextVersion(checkpoint.getCheckpointVersion()));
         checkpoint.setResumeToken(request.getResumeToken());
         checkpoint.setRequiresHuman(Boolean.TRUE.equals(request.getRequiresHuman()));
         checkpoint.setHumanTaskId(request.getHumanTaskId());
         checkpoint.setResumeAfterNode(request.getResumeAfterNode());
+        checkpoint.setEventSequence(request.getEventSequence());
         checkpoint.setLoopCount(defaultInt(request.getLoopCount()));
         checkpoint.setToolLoopCount(defaultInt(request.getToolLoopCount()));
         checkpoint.setReviewCount(defaultInt(request.getReviewCount()));
@@ -58,8 +60,14 @@ public class RuntimeCheckpointService {
         if (request.getCurrentNode() != null) {
             run.setCurrentNode(request.getCurrentNode());
         }
+        if (request.getOrchestrationMode() != null) {
+            run.setOrchestrationMode(request.getOrchestrationMode());
+        }
         if (request.getStatus() != null) {
             run.setStatus(request.getStatus());
+        }
+        if (request.getEventSequence() != null) {
+            run.setLastEventSequence(request.getEventSequence());
         }
         run.setRequiresHuman(Boolean.TRUE.equals(request.getRequiresHuman()));
         if (request.getResumeToken() != null || !Boolean.TRUE.equals(request.getRequiresHuman())) {
@@ -85,11 +93,13 @@ public class RuntimeCheckpointService {
                 .sessionId(checkpoint.getSessionId())
                 .status(checkpoint.getStatus())
                 .currentNode(checkpoint.getCurrentNode())
+                .orchestrationMode(checkpoint.getOrchestrationMode())
                 .checkpointVersion(checkpoint.getCheckpointVersion())
                 .resumeToken(checkpoint.getResumeToken())
                 .requiresHuman(checkpoint.getRequiresHuman())
                 .humanTaskId(checkpoint.getHumanTaskId())
                 .resumeAfterNode(checkpoint.getResumeAfterNode())
+                .eventSequence(checkpoint.getEventSequence())
                 .loopCount(checkpoint.getLoopCount())
                 .toolLoopCount(checkpoint.getToolLoopCount())
                 .reviewCount(checkpoint.getReviewCount())

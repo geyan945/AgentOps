@@ -18,4 +18,6 @@ public class EvalCaseResponse {
     private String expectedApprovalPolicy;
     private Integer expectedCitationMin;
     private List<String> expectedArtifactTypes;
+    private String expectedOrchestrationMode;
+    private List<String> expectedSkills;
 }

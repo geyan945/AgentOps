@@ -12,5 +12,29 @@ public interface ToolExecutor {
 
     List<String> getArgumentNames();
 
+    default String getRiskLevel() {
+        return "LOW";
+    }
+
+    default String getApprovalPolicy() {
+        return "NONE";
+    }
+
+    default boolean isIdempotent() {
+        return true;
+    }
+
+    default int getTimeoutBudgetMs() {
+        return 3_000;
+    }
+
+    default String getRetryPolicy() {
+        return "SAFE_RETRY";
+    }
+
+    default boolean isAuditRequired() {
+        return false;
+    }
+
     ToolResult execute(JsonNode arguments, ToolContext context);
 }

@@ -35,6 +35,7 @@ public class RuntimeCallbackService {
     private final ToolRegistry toolRegistry;
     private final AgentMemoryService agentMemoryService;
     private final AgentHumanTaskService humanTaskService;
+    private final AgentRunEventService agentRunEventService;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
@@ -68,13 +69,21 @@ public class RuntimeCallbackService {
         step.setNodeId(request.getNodeId());
         step.setNodeLabel(request.getNodeLabel());
         step.setToolName(request.getToolName());
+        step.setEventSequence(request.getEventSequence() == null ? agentRunEventService.nextEventSequence(runId) : request.getEventSequence());
         step.setAttemptNo(request.getAttemptNo());
         step.setParentStepId(request.getParentStepId());
+        step.setSkillName(request.getSkillName());
+        step.setSkillType(request.getSkillType());
+        step.setRiskLevel(request.getRiskLevel());
+        step.setApprovalPolicy(request.getApprovalPolicy());
+        step.setApprovalReason(request.getApprovalReason());
+        step.setRetryReason(request.getRetryReason());
         step.setInputJson(writeJson(request.getInput()));
         step.setOutputJson(writeJson(request.getOutput()));
         step.setStateBeforeJson(writeJson(request.getStateBefore()));
         step.setStateAfterJson(writeJson(request.getStateAfter()));
         step.setObservationJson(writeJson(request.getObservation()));
+        step.setCostUsageJson(writeJson(request.getCostUsage()));
         step.setLatencyMs(request.getLatencyMs());
         step.setModelName(request.getModelName());
         step.setPromptVersion(request.getPromptVersion());
@@ -83,7 +92,9 @@ public class RuntimeCallbackService {
         AgentRunStep saved = agentRunStepRepository.save(step);
         run.setTotalSteps((int) agentRunStepRepository.countByRunId(runId));
         run.setCurrentNode(request.getNodeId());
+        run.setLastEventSequence(saved.getEventSequence());
         agentRunRepository.save(run);
+        agentRunEventService.publishStepEvent(run, saved, request);
 
         if ("HUMAN_TASK".equalsIgnoreCase(request.getStepType())) {
             humanTaskService.createPendingTask(
@@ -104,13 +115,21 @@ public class RuntimeCallbackService {
                 .nodeId(saved.getNodeId())
                 .nodeLabel(saved.getNodeLabel())
                 .toolName(saved.getToolName())
+                .eventSequence(saved.getEventSequence())
                 .attemptNo(saved.getAttemptNo())
                 .parentStepId(saved.getParentStepId())
+                .skillName(saved.getSkillName())
+                .skillType(saved.getSkillType())
+                .riskLevel(saved.getRiskLevel())
+                .approvalPolicy(saved.getApprovalPolicy())
+                .approvalReason(saved.getApprovalReason())
+                .retryReason(saved.getRetryReason())
                 .inputJson(saved.getInputJson())
                 .outputJson(saved.getOutputJson())
                 .stateBeforeJson(saved.getStateBeforeJson())
                 .stateAfterJson(saved.getStateAfterJson())
                 .observationJson(saved.getObservationJson())
+                .costUsageJson(saved.getCostUsageJson())
                 .latencyMs(saved.getLatencyMs())
                 .modelName(saved.getModelName())
                 .promptVersion(saved.getPromptVersion())
@@ -127,15 +146,24 @@ public class RuntimeCallbackService {
         run.setCurrentNode(request.getCurrentNode());
         run.setGraphName(request.getGraphName());
         run.setGraphVersion(request.getGraphVersion());
+        if (request.getOrchestrationMode() != null) {
+            run.setOrchestrationMode(request.getOrchestrationMode());
+        }
         run.setRequiresHuman(Boolean.TRUE.equals(request.getRequiresHuman()));
         run.setResumeToken(request.getResumeToken());
         if (request.getCheckpointVersion() != null) {
             run.setCheckpointVersion(request.getCheckpointVersion());
             run.setLastCheckpointAt(LocalDateTime.now());
         }
+        if (request.getEventSequence() != null) {
+            run.setLastEventSequence(request.getEventSequence());
+        }
         run.setFinalAnswer(request.getFinalAnswer());
         run.setArtifactsJson(writeJson(request.getArtifacts()));
         run.setCitationsJson(writeJson(request.getCitations()));
+        run.setCostUsageJson(writeJson(request.getCostUsage()));
+        run.setApprovalReason(request.getApprovalReason());
+        run.setReplayRecovered(Boolean.TRUE.equals(request.getReplayRecovered()));
         run.setErrorMessage(request.getErrorMessage());
         if (isTerminalStatus(request.getStatus())) {
             run.setFinishedAt(LocalDateTime.now());
@@ -147,6 +175,7 @@ public class RuntimeCallbackService {
             run.setResumeToken(null);
         }
         agentRunRepository.save(run);
+        agentRunEventService.publishStatusEvent(run, request);
         if (request.getFinalAnswer() != null && !request.getFinalAnswer().isBlank()) {
             sessionService.saveMessage(run.getSessionId(), "assistant", request.getFinalAnswer(), writeJson(request.getCitations()));
         }

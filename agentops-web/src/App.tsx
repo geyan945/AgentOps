@@ -16,8 +16,10 @@ import {
   fetchSessionMessages,
   fetchSessions,
   login,
+  replayRun,
+  subscribeRunEvents,
 } from './lib/api'
-import type { AgentGraphResponse, AgentRunResponse, EvalDashboardResponse, HumanTaskResponse, MessageResponse, SessionResponse } from './types'
+import type { AgentGraphResponse, AgentRunEventResponse, AgentRunResponse, EvalDashboardResponse, HumanTaskResponse, MessageResponse, SessionResponse } from './types'
 
 function App() {
   const [token, setToken] = useState<string>(() => localStorage.getItem('agentops_token') ?? '')
@@ -26,6 +28,9 @@ function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null)
   const [currentRunId, setCurrentRunId] = useState<number | null>(null)
   const [runMessage, setRunMessage] = useState('请总结 AgentOps 的工具调用链路，并统计当前会话数量')
+  const [orchestrationMode, setOrchestrationMode] = useState<'SINGLE_GRAPH' | 'TEAM_GRAPH'>('TEAM_GRAPH')
+  const [liveEvents, setLiveEvents] = useState<AgentRunEventResponse[]>([])
+  const [eventStreamStatus, setEventStreamStatus] = useState<'idle' | 'connecting' | 'live' | 'fallback'>('idle')
   const [newSessionTitle, setNewSessionTitle] = useState('AgentOps 工作台')
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -67,10 +72,19 @@ function App() {
   })
 
   const runMutation = useMutation({
-    mutationFn: () => createAgentRun(token, selectedSessionId!, runMessage),
+    mutationFn: () => createAgentRun(token, selectedSessionId!, runMessage, { orchestrationMode }),
     onSuccess: (run) => {
       setCurrentRunId(run.runId)
       navigate('/')
+    },
+  })
+
+  const replayMutation = useMutation({
+    mutationFn: ({ runId, checkpointVersion }: { runId: number; checkpointVersion?: number }) => replayRun(token, runId, checkpointVersion),
+    onSuccess: (run) => {
+      setCurrentRunId(run.runId)
+      queryClient.invalidateQueries({ queryKey: ['run', token, run.runId] })
+      queryClient.invalidateQueries({ queryKey: ['graph', token, run.runId] })
     },
   })
 
@@ -116,6 +130,33 @@ function App() {
       navigate('/')
     },
   })
+
+  useEffect(() => {
+    setLiveEvents([])
+    if (!token || !currentRunId) {
+      setEventStreamStatus('idle')
+      return
+    }
+    setEventStreamStatus('connecting')
+    const unsubscribe = subscribeRunEvents(token, currentRunId, {
+      onEvent: (_eventType, event) => {
+        if (!('eventSequence' in event) || typeof event.eventSequence !== 'number') {
+          return
+        }
+        setEventStreamStatus('live')
+        setLiveEvents((previous) => {
+          const next = [...previous.filter((item) => item.eventSequence !== event.eventSequence), event as AgentRunEventResponse]
+          return next.sort((a, b) => a.eventSequence - b.eventSequence).slice(-24)
+        })
+      },
+      onError: () => {
+        setEventStreamStatus('fallback')
+      },
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [token, currentRunId])
 
   if (!token) {
     return (
@@ -199,12 +240,18 @@ function App() {
                 currentGraph={graphQuery.data ?? null}
                 runMessage={runMessage}
                 setRunMessage={setRunMessage}
+                orchestrationMode={orchestrationMode}
+                setOrchestrationMode={setOrchestrationMode}
                 runPending={runMutation.isPending}
                 onRun={() => selectedSessionId && runMutation.mutate()}
+                onReplay={() => currentRunId && replayMutation.mutate({ runId: currentRunId, checkpointVersion: runQuery.data?.checkpointVersion })}
+                replayPending={replayMutation.isPending}
                 newSessionTitle={newSessionTitle}
                 setNewSessionTitle={setNewSessionTitle}
                 onCreateSession={() => createSessionMutation.mutate()}
                 approvals={approvalsQuery.data ?? []}
+                liveEvents={liveEvents}
+                eventStreamStatus={eventStreamStatus}
               />
             }
           />
@@ -228,12 +275,18 @@ function WorkspaceView(props: {
   currentGraph: AgentGraphResponse | null
   runMessage: string
   setRunMessage: (value: string) => void
+  orchestrationMode: 'SINGLE_GRAPH' | 'TEAM_GRAPH'
+  setOrchestrationMode: (value: 'SINGLE_GRAPH' | 'TEAM_GRAPH') => void
   runPending: boolean
   onRun: () => void
+  onReplay: () => void
+  replayPending: boolean
   newSessionTitle: string
   setNewSessionTitle: (value: string) => void
   onCreateSession: () => void
   approvals: HumanTaskResponse[]
+  liveEvents: AgentRunEventResponse[]
+  eventStreamStatus: 'idle' | 'connecting' | 'live' | 'fallback'
 }) {
   const flow = useMemo(() => buildFlow(props.currentGraph), [props.currentGraph])
   return (
@@ -271,11 +324,31 @@ function WorkspaceView(props: {
         </div>
         <div className="mt-5 rounded-[1.25rem] border border-slate-200 bg-slate-50 p-4">
           <textarea value={props.runMessage} onChange={(event) => props.setRunMessage(event.target.value)} className="min-h-28 w-full resize-none bg-transparent text-sm outline-none" />
-          <div className="mt-4 flex items-center justify-between">
-            <div className="text-sm text-slate-500">工作台每 2 秒轮询 run 与 graph 状态</div>
-            <button className="rounded-full bg-orange-500 px-5 py-2 text-sm font-medium text-white hover:bg-orange-600" onClick={props.onRun}>
-              {props.runPending ? '启动中...' : '启动 Run'}
-            </button>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 text-sm text-slate-500">
+              <span>SSE 实时推送，轮询兜底</span>
+              <span className="rounded-full bg-slate-200 px-3 py-1 text-xs text-slate-700">{props.eventStreamStatus}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <select
+                value={props.orchestrationMode}
+                onChange={(event) => props.setOrchestrationMode(event.target.value as 'SINGLE_GRAPH' | 'TEAM_GRAPH')}
+                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700"
+              >
+                <option value="SINGLE_GRAPH">Single Graph</option>
+                <option value="TEAM_GRAPH">Team Graph</option>
+              </select>
+              <button
+                className="rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!props.currentRun?.checkpointVersion || props.currentRun.requiresHuman || props.replayPending}
+                onClick={props.onReplay}
+              >
+                {props.replayPending ? 'Replaying...' : 'Checkpoint Replay'}
+              </button>
+              <button className="rounded-full bg-orange-500 px-5 py-2 text-sm font-medium text-white hover:bg-orange-600" onClick={props.onRun}>
+                {props.runPending ? '启动中...' : '启动 Run'}
+              </button>
+            </div>
           </div>
         </div>
         <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr]">
@@ -297,9 +370,13 @@ function WorkspaceView(props: {
                 <article key={step.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{step.stepType}</span>
-                    <span className="text-xs text-slate-500">{step.nodeLabel ?? step.nodeId ?? '-'}</span>
+                    <span className="text-xs text-slate-500">{step.nodeLabel ?? step.nodeId ?? '-'} / #{step.eventSequence ?? step.stepNo}</span>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">{step.toolName ? `tool: ${step.toolName}` : 'graph event'}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {step.toolName ? `tool: ${step.toolName}` : 'graph event'}
+                    {step.skillName ? ` | skill: ${step.skillName}` : ''}
+                    {step.riskLevel ? ` | risk: ${step.riskLevel}` : ''}
+                  </p>
                   <pre className="mt-3 overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-100">{step.observationJson || step.outputJson || step.inputJson || '{}'}</pre>
                 </article>
               ))}
@@ -315,7 +392,7 @@ function WorkspaceView(props: {
               <p className="text-sm uppercase tracking-[0.2em] text-orange-600">LangGraph Runtime</p>
               <h2 className="text-xl font-semibold">Execution Graph</h2>
             </div>
-            {props.currentGraph ? <p className="text-xs text-slate-500">{props.currentGraph.graphName} / {props.currentGraph.graphVersion}</p> : null}
+            {props.currentGraph ? <p className="text-xs text-slate-500">{props.currentGraph.graphName} / {props.currentGraph.graphVersion} / {props.currentGraph.orchestrationMode}</p> : null}
           </div>
           <div className="mt-4 h-[22rem] overflow-hidden rounded-[1.25rem] border border-slate-200">
             <ReactFlow nodes={flow.nodes} edges={flow.edges} fitView nodesDraggable={false} elementsSelectable={false}>
@@ -323,6 +400,24 @@ function WorkspaceView(props: {
               <MiniMap zoomable pannable />
               <Controls showInteractive={false} />
             </ReactFlow>
+          </div>
+        </div>
+        <div className="rounded-[1.75rem] border border-white/70 bg-white/80 p-5 shadow-lg backdrop-blur">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Live Event Stream</h2>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{props.liveEvents.length} events</span>
+          </div>
+          <div className="mt-4 max-h-72 space-y-3 overflow-auto pr-1">
+            {props.liveEvents.map((event) => (
+              <article key={event.id ?? event.eventSequence} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold">{event.eventType}</span>
+                  <span className="text-xs text-slate-500">#{event.eventSequence}</span>
+                </div>
+                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{event.nodeId ?? event.status ?? 'runtime-event'}</p>
+                <pre className="mt-3 overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-100">{event.payloadJson ?? '{}'}</pre>
+              </article>
+            ))}
           </div>
         </div>
         <div className="rounded-[1.75rem] border border-white/70 bg-white/80 p-5 shadow-lg backdrop-blur">

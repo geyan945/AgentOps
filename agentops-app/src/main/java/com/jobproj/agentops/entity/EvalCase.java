@@ -40,12 +40,19 @@ public class EvalCase {
     @Column(name = "expected_approval_policy", length = 64)
     private String expectedApprovalPolicy;
 
+    @Column(name = "expected_orchestration_mode", length = 64)
+    private String expectedOrchestrationMode;
+
     @Column(name = "expected_citation_min")
     private Integer expectedCitationMin;
 
     @Lob
     @Column(name = "expected_artifact_types_json", columnDefinition = "MEDIUMTEXT")
     private String expectedArtifactTypesJson;
+
+    @Lob
+    @Column(name = "expected_skills_json", columnDefinition = "MEDIUMTEXT")
+    private String expectedSkillsJson;
 
     @Lob
     @Column(name = "expected_reference_json", columnDefinition = "MEDIUMTEXT")

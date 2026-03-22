@@ -28,6 +28,9 @@ public class AgentRuntimeCheckpoint {
     @Column(name = "current_node", length = 64)
     private String currentNode;
 
+    @Column(name = "orchestration_mode", length = 32)
+    private String orchestrationMode;
+
     @Column(name = "checkpoint_version", nullable = false)
     private Integer checkpointVersion;
 
@@ -42,6 +45,9 @@ public class AgentRuntimeCheckpoint {
 
     @Column(name = "resume_after_node", length = 64)
     private String resumeAfterNode;
+
+    @Column(name = "event_sequence")
+    private Integer eventSequence;
 
     @Column(name = "loop_count")
     private Integer loopCount;

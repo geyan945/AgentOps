@@ -20,7 +20,11 @@ public class EvalCaseExecutionResult {
     private String route;
     private Boolean approvalTriggered;
     private String approvalDecision;
+    private String orchestrationMode;
     private List<String> nodePath;
     private List<String> artifactTypes;
     private List<String> toolTrace;
+    private List<String> skillsUsed;
+    private Boolean replayRecovered;
+    private java.util.Map<String, Object> costUsage;
 }

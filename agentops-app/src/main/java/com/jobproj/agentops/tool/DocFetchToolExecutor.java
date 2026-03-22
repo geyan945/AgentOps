@@ -31,6 +31,9 @@ public class DocFetchToolExecutor implements ToolExecutor {
     public List<String> getArgumentNames() { return List.of("documentId"); }
 
     @Override
+    public int getTimeoutBudgetMs() { return 2_000; }
+
+    @Override
     public ToolResult execute(JsonNode arguments, ToolContext context) {
         Long documentId = arguments.path("documentId").asLong();
         JsonNode data = toolCacheService.getOrLoad(getName(), String.valueOf(documentId), Duration.ofSeconds(cacheTtlSeconds), () -> aiSmartQaReadService.fetchDocument(documentId));

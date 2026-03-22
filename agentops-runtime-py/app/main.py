@@ -4,7 +4,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 
 from .config import settings
 from .graph_runtime import AgentRuntime
-from .models import ApiResponse, RuntimeCommandResponse, RuntimeResumeRunRequest, RuntimeStartRunRequest
+from .models import ApiResponse, RuntimeCommandResponse, RuntimeReplayRunRequest, RuntimeResumeRunRequest, RuntimeStartRunRequest
 
 app = FastAPI(title="AgentOps Runtime", version="2.0.0")
 runtime = AgentRuntime()
@@ -30,7 +30,7 @@ def start_run(
     if request.waitForCompletion:
         return ApiResponse(data=runtime.start_run(request))
     background_tasks.add_task(runtime.start_run_background, request)
-    return ApiResponse(data=RuntimeCommandResponse(accepted=True, status="RUNNING", currentNode="intake_guardrail"))
+    return ApiResponse(data=RuntimeCommandResponse(accepted=True, status="RUNNING", currentNode="intake_guardrail", orchestrationMode=request.orchestrationMode))
 
 
 @app.post("/runtime/graphs/enterprise-copilot/runs/{run_id}/resume")
@@ -47,3 +47,19 @@ def resume_run(
     runtime.validate_resume_request(request)
     background_tasks.add_task(runtime.resume_run_background, request)
     return ApiResponse(data=RuntimeCommandResponse(accepted=True, status="RUNNING", currentNode="supervisor_plan", checkpointVersion=request.checkpointVersion))
+
+
+@app.post("/runtime/graphs/enterprise-copilot/runs/{run_id}/replay")
+def replay_run(
+    run_id: int,
+    request: RuntimeReplayRunRequest,
+    background_tasks: BackgroundTasks,
+    x_agentops_internal_key: str | None = Header(default=None),
+) -> ApiResponse:
+    ensure_internal_access(x_agentops_internal_key)
+    request.runId = run_id
+    runtime.validate_replay_request(request)
+    if request.waitForCompletion:
+        return ApiResponse(data=runtime.replay_run(request))
+    background_tasks.add_task(runtime.replay_run_background, request)
+    return ApiResponse(data=RuntimeCommandResponse(accepted=True, status="RUNNING", currentNode="checkpoint_replay", checkpointVersion=request.checkpointVersion))

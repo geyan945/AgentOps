@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Dict, List, Tuple
 
 from pydantic import BaseModel, Field
@@ -107,15 +108,17 @@ class GeminiLLMService:
         last_error = None
         for retries in range(settings.llm_max_retries):
             try:
+                started = time.perf_counter()
                 message = self._llm.invoke(prompt)
                 raw_text = self._message_text(message)
                 parsed = schema_cls.model_validate(json.loads(self._normalize_json(raw_text)))
                 usage = getattr(message, "usage_metadata", None) or getattr(message, "response_metadata", None) or {}
-                return parsed, {"mode": self.mode, "retryCount": retries, "usage": usage}
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                return parsed, {"mode": self.mode, "retryCount": retries, "usage": usage, "latencyMs": latency_ms}
             except Exception as exc:  # pragma: no cover
                 last_error = str(exc)
         fallback_result = fallback(state)
-        return fallback_result, {"mode": "mock-fallback", "retryCount": retries + 1, "lastError": last_error or "unknown"}
+        return fallback_result, {"mode": "mock-fallback", "retryCount": retries + 1, "lastError": last_error or "unknown", "latencyMs": 1}
 
     def _mock_plan(self, state: Dict[str, Any]) -> SupervisorPlanOutput:
         route = classify_route(state.get("userInput", ""), state.get("reviewFeedback"))

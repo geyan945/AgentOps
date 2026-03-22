@@ -1,6 +1,6 @@
 # AgentOps：企业级多工具智能体平台（2.0 已落地为 Java Control Plane + LangGraph Runtime）
 
-> 2026-03-21 更新：项目当前主版本已经从单体 Java MVP 升级为 `agentops-app + agentops-runtime-py + agentops-web` 三模块结构，名称仍然保留为 **AgentOps**。下文保留原始实现路线，同时建议结合根目录 `README.md` 与 `docs/01`、`docs/03` 作为最新演示与简历口径。
+> 2026-03-22 更新：项目当前主版本已经从单体 Java MVP 升级为 `agentops-app + agentops-runtime-py + agentops-web` 三模块结构，名称仍然保留为 **AgentOps**。当前最新口径已经补到 `checkpoint replay + SSE event stream + SINGLE_GRAPH / TEAM_GRAPH + skill trace + runtime-based Eval`，建议结合根目录 `README.md`、`docs/01`、`docs/03`、`docs/06` 作为最新演示与简历口径。
 
 # AgentOps：基于 MCP 的企业级多工具智能体平台（详细实现路线）
 

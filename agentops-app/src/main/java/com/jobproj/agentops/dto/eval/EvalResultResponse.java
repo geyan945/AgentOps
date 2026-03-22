@@ -25,6 +25,9 @@ public class EvalResultResponse {
     private String nodePathJson;
     private Boolean approvalTriggered;
     private String approvalDecision;
+    private String skillsUsedJson;
+    private Boolean replayRecovered;
+    private String costUsageJson;
     private String judgeModel;
     private String judgeReason;
     private Long latencyMs;

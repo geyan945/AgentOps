@@ -18,11 +18,13 @@ public class RuntimeCheckpointResponse {
     private Long sessionId;
     private String status;
     private String currentNode;
+    private String orchestrationMode;
     private Integer checkpointVersion;
     private String resumeToken;
     private Boolean requiresHuman;
     private Long humanTaskId;
     private String resumeAfterNode;
+    private Integer eventSequence;
     private Integer loopCount;
     private Integer toolLoopCount;
     private Integer reviewCount;

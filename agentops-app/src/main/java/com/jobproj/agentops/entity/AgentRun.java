@@ -3,7 +3,6 @@ package com.jobproj.agentops.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.Setter;
 
 import java.time.LocalDateTime;
 
@@ -43,6 +42,9 @@ public class AgentRun {
     @Column(name = "approval_policy", nullable = false, length = 32)
     private String approvalPolicy;
 
+    @Column(name = "orchestration_mode", nullable = false, length = 32)
+    private String orchestrationMode;
+
     @Column(name = "graph_name", length = 64)
     private String graphName;
 
@@ -61,6 +63,9 @@ public class AgentRun {
     @Column(name = "checkpoint_version")
     private Integer checkpointVersion = 0;
 
+    @Column(name = "last_event_sequence")
+    private Integer lastEventSequence = 0;
+
     @Column(name = "last_checkpoint_at")
     private LocalDateTime lastCheckpointAt;
 
@@ -77,6 +82,17 @@ public class AgentRun {
     @Lob
     @Column(name = "citations_json", columnDefinition = "MEDIUMTEXT")
     private String citationsJson;
+
+    @Lob
+    @Column(name = "cost_usage_json", columnDefinition = "MEDIUMTEXT")
+    private String costUsageJson;
+
+    @Lob
+    @Column(name = "approval_reason", columnDefinition = "MEDIUMTEXT")
+    private String approvalReason;
+
+    @Column(name = "replay_recovered")
+    private Boolean replayRecovered = Boolean.FALSE;
 
     @Lob
     @Column(name = "error_message", columnDefinition = "MEDIUMTEXT")
@@ -102,6 +118,9 @@ public class AgentRun {
         }
         if (this.approvalPolicy == null) {
             this.approvalPolicy = "MANUAL";
+        }
+        if (this.orchestrationMode == null) {
+            this.orchestrationMode = "SINGLE_GRAPH";
         }
     }
 }

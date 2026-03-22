@@ -16,4 +16,6 @@ public class AgentRunRequest {
     private String executionMode;
 
     private String approvalPolicy;
+
+    private String orchestrationMode;
 }

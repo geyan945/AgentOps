@@ -14,4 +14,10 @@ public class ToolInfoResponse {
     private String name;
     private String description;
     private List<String> argumentNames;
+    private String riskLevel;
+    private String approvalPolicy;
+    private Boolean idempotent;
+    private Integer timeoutBudgetMs;
+    private String retryPolicy;
+    private Boolean auditRequired;
 }

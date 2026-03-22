@@ -2,6 +2,7 @@ package com.jobproj.agentops.runtime;
 
 import com.jobproj.agentops.common.ApiResponse;
 import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeReplayRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeResumeRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeStartRunRequest;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,17 @@ public class RuntimeClient {
     public RuntimeCommandResponse resumeRun(RuntimeResumeRunRequest request) {
         ApiResponse<RuntimeCommandResponse> response = buildClient().post()
                 .uri("/runtime/graphs/enterprise-copilot/runs/{runId}/resume", request.getRunId())
+                .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(new ParameterizedTypeReference<ApiResponse<RuntimeCommandResponse>>() {});
+        return response == null ? null : response.getData();
+    }
+
+    public RuntimeCommandResponse replayRun(RuntimeReplayRunRequest request) {
+        ApiResponse<RuntimeCommandResponse> response = buildClient().post()
+                .uri("/runtime/graphs/enterprise-copilot/runs/{runId}/replay", request.getRunId())
                 .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)

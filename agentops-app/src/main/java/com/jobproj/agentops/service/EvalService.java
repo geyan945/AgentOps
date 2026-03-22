@@ -84,6 +84,8 @@ public class EvalService {
             evalCase.setExpectedApprovalPolicy(item.getExpectedApprovalPolicy());
             evalCase.setExpectedCitationMin(item.getExpectedCitationMin());
             evalCase.setExpectedArtifactTypesJson(toJson(item.getExpectedArtifactTypes()));
+            evalCase.setExpectedOrchestrationMode(item.getExpectedOrchestrationMode());
+            evalCase.setExpectedSkillsJson(toJson(item.getExpectedSkills()));
             cases.add(evalCase);
         });
         evalCaseRepository.saveAll(cases);
@@ -230,6 +232,9 @@ public class EvalService {
             evalResult.setNodePathJson(toJson(executionResult.getNodePath()));
             evalResult.setApprovalTriggered(executionResult.getApprovalTriggered());
             evalResult.setApprovalDecision(executionResult.getApprovalDecision());
+            evalResult.setSkillsUsedJson(toJson(executionResult.getSkillsUsed()));
+            evalResult.setReplayRecovered(executionResult.getReplayRecovered());
+            evalResult.setCostUsageJson(toJson(executionResult.getCostUsage()));
             evalResult.setJudgeModel(scoreOutcome.getJudgeModel());
             evalResult.setJudgeReason(scoreOutcome.getJudgeReason());
             evalResult.setLatencyMs(executionResult.getLatencyMs());
@@ -256,6 +261,7 @@ public class EvalService {
         run.setRuntimeType("LANGGRAPH");
         run.setExecutionMode("EVAL");
         run.setApprovalPolicy(resolveApprovalPolicy(evalCase));
+        run.setOrchestrationMode(resolveOrchestrationMode(evalCase));
         run.setGraphName("enterprise-copilot");
         run.setGraphVersion("v2.1");
         run.setCurrentNode("intake_guardrail");
@@ -269,6 +275,7 @@ public class EvalService {
                     .userInput(evalCase.getQuestion())
                     .executionMode(run.getExecutionMode())
                     .approvalPolicy(run.getApprovalPolicy())
+                    .orchestrationMode(run.getOrchestrationMode())
                     .waitForCompletion(true)
                     .build());
         } catch (Exception ex) {
@@ -335,9 +342,13 @@ public class EvalService {
                 .route(route)
                 .approvalTriggered(nodePath.contains("human_approval"))
                 .approvalDecision(StringUtils.hasText(approvalDecision) ? approvalDecision.toUpperCase() : (nodePath.contains("human_approval") ? "PENDING" : "NONE"))
+                .orchestrationMode(run.getOrchestrationMode())
                 .nodePath(List.copyOf(nodePath))
                 .artifactTypes(artifactTypes)
                 .toolTrace(new ArrayList<>(tools))
+                .skillsUsed(steps.stream().map(AgentRunStep::getSkillName).filter(StringUtils::hasText).distinct().toList())
+                .replayRecovered(Boolean.TRUE.equals(run.getReplayRecovered()))
+                .costUsage(readJsonObject(run.getCostUsageJson()))
                 .build();
     }
 
@@ -359,6 +370,9 @@ public class EvalService {
         evalResult.setNodePathJson("[]");
         evalResult.setApprovalTriggered(false);
         evalResult.setApprovalDecision("NONE");
+        evalResult.setSkillsUsedJson("[]");
+        evalResult.setReplayRecovered(false);
+        evalResult.setCostUsageJson("{}");
         evalResult.setJudgeModel("rule-keyword");
         evalResult.setJudgeReason("执行失败，未进入 judge");
         evalResult.setLatencyMs(0L);
@@ -414,6 +428,8 @@ public class EvalService {
                 .expectedApprovalPolicy(evalCase.getExpectedApprovalPolicy())
                 .expectedCitationMin(evalCase.getExpectedCitationMin())
                 .expectedArtifactTypes(readStringList(evalCase.getExpectedArtifactTypesJson()))
+                .expectedOrchestrationMode(evalCase.getExpectedOrchestrationMode())
+                .expectedSkills(readStringList(evalCase.getExpectedSkillsJson()))
                 .build();
     }
 
@@ -449,6 +465,9 @@ public class EvalService {
                 .nodePathJson(evalResult.getNodePathJson())
                 .approvalTriggered(evalResult.getApprovalTriggered())
                 .approvalDecision(evalResult.getApprovalDecision())
+                .skillsUsedJson(evalResult.getSkillsUsedJson())
+                .replayRecovered(evalResult.getReplayRecovered())
+                .costUsageJson(evalResult.getCostUsageJson())
                 .judgeModel(evalResult.getJudgeModel())
                 .judgeReason(evalResult.getJudgeReason())
                 .latencyMs(evalResult.getLatencyMs())
@@ -481,6 +500,13 @@ public class EvalService {
         return normalized;
     }
 
+    private String resolveOrchestrationMode(EvalCase evalCase) {
+        if (!StringUtils.hasText(evalCase.getExpectedOrchestrationMode())) {
+            return "SINGLE_GRAPH";
+        }
+        return evalCase.getExpectedOrchestrationMode().trim().toUpperCase();
+    }
+
     private String readStringField(String json, String fieldName) {
         if (!StringUtils.hasText(json)) {
             return null;
@@ -502,6 +528,17 @@ public class EvalService {
             return objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
         } catch (Exception ex) {
             return List.of();
+        }
+    }
+
+    private Map<String, Object> readJsonObject(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception ex) {
+            return Map.of();
         }
     }
 

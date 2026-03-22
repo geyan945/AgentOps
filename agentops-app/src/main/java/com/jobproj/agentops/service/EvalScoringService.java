@@ -42,6 +42,8 @@ public class EvalScoringService {
 
         boolean nodePathMatched = nodePathMatches(readStringList(evalCase.getExpectedNodePathJson()), executionResult.getNodePath());
         boolean artifactsMatched = artifactsMatch(readStringList(evalCase.getExpectedArtifactTypesJson()), executionResult.getArtifactTypes());
+        boolean orchestrationMatched = orchestrationMatches(evalCase.getExpectedOrchestrationMode(), executionResult.getOrchestrationMode());
+        boolean skillsMatched = skillsMatch(readStringList(evalCase.getExpectedSkillsJson()), executionResult.getSkillsUsed());
         boolean retryWithinBound = executionResult.getRetryCount() == null || executionResult.getRetryCount() <= 2;
 
         if (!nodePathMatched) {
@@ -50,12 +52,18 @@ public class EvalScoringService {
         if (!artifactsMatched) {
             reasons.add("artifact 类型未命中预期");
         }
+        if (!orchestrationMatched) {
+            reasons.add("orchestration mode 未命中预期");
+        }
+        if (!skillsMatched) {
+            reasons.add("skills 使用未命中预期");
+        }
         if (!retryWithinBound) {
             reasons.add("retry 次数超过上限: " + executionResult.getRetryCount());
         }
 
         double finalScore = Math.min(1D, Math.max(0D, routeScore * 0.25D + groundingScore * 0.45D + citationScore * 0.20D + approvalScore * 0.10D));
-        boolean success = finalScore >= passScore && nodePathMatched && artifactsMatched && retryWithinBound;
+        boolean success = finalScore >= passScore && nodePathMatched && artifactsMatched && orchestrationMatched && skillsMatched && retryWithinBound;
         if (!Boolean.TRUE.equals(executionResult.getSuccess())) {
             success = false;
             reasons.add("执行阶段报错: " + executionResult.getErrorMessage());
@@ -223,6 +231,24 @@ public class EvalScoringService {
         }
         return expectedArtifacts.stream().allMatch(expected ->
                 actualArtifacts.stream().anyMatch(actual -> expected.equalsIgnoreCase(actual)));
+    }
+
+    private boolean orchestrationMatches(String expectedMode, String actualMode) {
+        if (!StringUtils.hasText(expectedMode)) {
+            return true;
+        }
+        return expectedMode.equalsIgnoreCase(actualMode);
+    }
+
+    private boolean skillsMatch(List<String> expectedSkills, List<String> actualSkills) {
+        if (expectedSkills.isEmpty()) {
+            return true;
+        }
+        if (actualSkills == null || actualSkills.isEmpty()) {
+            return false;
+        }
+        return expectedSkills.stream().allMatch(expected ->
+                actualSkills.stream().anyMatch(actual -> expected.equalsIgnoreCase(actual)));
     }
 
     private boolean containsIgnoreCase(String actualValue, String expectedValue) {

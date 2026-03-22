@@ -32,14 +32,14 @@ public class AgentGraphService {
                 .filter(nodeId -> nodeId != null && !nodeId.isBlank())
                 .collect(Collectors.toSet());
         Map<String, String> labels = Map.of(
-                "intake_guardrail", "Intake Guardrail",
-                "load_memory", "Load Memory",
-                "supervisor_plan", "Supervisor Plan",
-                "knowledge_researcher", "Knowledge Researcher",
-                "data_analyst", "Data Analyst",
-                "evidence_reviewer", "Evidence Reviewer",
+                "intake_guardrail", isTeamGraph(run) ? "Run Intake" : "Intake Guardrail",
+                "load_memory", isTeamGraph(run) ? "Memory Loader" : "Load Memory",
+                "supervisor_plan", isTeamGraph(run) ? "Planner Agent" : "Supervisor Plan",
+                "knowledge_researcher", isTeamGraph(run) ? "Knowledge Skill" : "Knowledge Researcher",
+                "data_analyst", isTeamGraph(run) ? "Data Skill" : "Data Analyst",
+                "evidence_reviewer", isTeamGraph(run) ? "Review Skill" : "Evidence Reviewer",
                 "human_approval", "Human Approval",
-                "finalize", "Finalize"
+                "finalize", isTeamGraph(run) ? "Finalize Skill" : "Finalize"
         );
         List<AgentGraphNodeResponse> nodes = NODE_ORDER.stream()
                 .map(nodeId -> AgentGraphNodeResponse.builder()
@@ -65,6 +65,7 @@ public class AgentGraphService {
                 .runId(run.getId())
                 .graphName(run.getGraphName())
                 .graphVersion(run.getGraphVersion())
+                .orchestrationMode(run.getOrchestrationMode())
                 .currentNode(run.getCurrentNode())
                 .status(run.getStatus())
                 .nodes(nodes)
@@ -87,5 +88,9 @@ public class AgentGraphService {
             return "FAILED";
         }
         return "PENDING";
+    }
+
+    private boolean isTeamGraph(AgentRun run) {
+        return "TEAM_GRAPH".equalsIgnoreCase(run.getOrchestrationMode());
     }
 }

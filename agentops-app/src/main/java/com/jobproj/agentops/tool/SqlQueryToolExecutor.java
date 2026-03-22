@@ -38,6 +38,21 @@ public class SqlQueryToolExecutor implements ToolExecutor {
     public List<String> getArgumentNames() { return List.of("queryType", "knowledgeBaseId"); }
 
     @Override
+    public String getRiskLevel() { return "HIGH"; }
+
+    @Override
+    public String getApprovalPolicy() { return "HUMAN_REVIEW"; }
+
+    @Override
+    public int getTimeoutBudgetMs() { return 4_000; }
+
+    @Override
+    public String getRetryPolicy() { return "NO_RETRY"; }
+
+    @Override
+    public boolean isAuditRequired() { return true; }
+
+    @Override
     public ToolResult execute(JsonNode arguments, ToolContext context) {
         String queryType = arguments.path("queryType").asText("");
         Long knowledgeBaseId = arguments.hasNonNull("knowledgeBaseId") ? arguments.path("knowledgeBaseId").asLong() : null;

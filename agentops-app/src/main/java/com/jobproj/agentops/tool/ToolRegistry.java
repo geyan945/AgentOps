@@ -38,6 +38,12 @@ public class ToolRegistry {
                         .name(tool.getName())
                         .description(tool.getDescription())
                         .argumentNames(tool.getArgumentNames())
+                        .riskLevel(tool.getRiskLevel())
+                        .approvalPolicy(tool.getApprovalPolicy())
+                        .idempotent(tool.isIdempotent())
+                        .timeoutBudgetMs(tool.getTimeoutBudgetMs())
+                        .retryPolicy(tool.getRetryPolicy())
+                        .auditRequired(tool.isAuditRequired())
                         .build())
                 .toList();
     }

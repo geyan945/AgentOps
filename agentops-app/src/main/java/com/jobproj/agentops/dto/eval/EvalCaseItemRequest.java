@@ -26,4 +26,8 @@ public class EvalCaseItemRequest {
     private Integer expectedCitationMin;
 
     private List<String> expectedArtifactTypes;
+
+    private String expectedOrchestrationMode;
+
+    private List<String> expectedSkills;
 }

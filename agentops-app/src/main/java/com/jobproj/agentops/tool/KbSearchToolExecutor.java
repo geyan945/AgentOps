@@ -31,6 +31,12 @@ public class KbSearchToolExecutor implements ToolExecutor {
     public List<String> getArgumentNames() { return List.of("query", "topK", "knowledgeBaseId"); }
 
     @Override
+    public int getTimeoutBudgetMs() { return 2_500; }
+
+    @Override
+    public String getRetryPolicy() { return "LINEAR_BACKOFF"; }
+
+    @Override
     public ToolResult execute(JsonNode arguments, ToolContext context) {
         String query = arguments.path("query").asText("");
         int topK = Math.max(1, arguments.path("topK").asInt(5));

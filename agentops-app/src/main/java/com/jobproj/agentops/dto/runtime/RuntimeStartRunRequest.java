@@ -17,5 +17,6 @@ public class RuntimeStartRunRequest {
     private String userInput;
     private String executionMode;
     private String approvalPolicy;
+    private String orchestrationMode;
     private boolean waitForCompletion;
 }

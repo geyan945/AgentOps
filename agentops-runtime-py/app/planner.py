@@ -42,9 +42,13 @@ def build_memory_facts(message: str, answer: str, citations: List[Dict[str, Any]
     if trimmed_question:
         facts.append({"factType": "PREFERENCE", "factKey": "recent_user_goal", "factValue": trimmed_question[:160]})
     if answer:
-        facts.append({"factType": "SUMMARY", "factKey": "recent_agent_answer", "factValue": answer[:300]})
+        facts.append({"factType": "FACT", "factKey": "recent_agent_answer", "factValue": answer[:300]})
+    if answer and "拒绝" in answer:
+        facts.append({"factType": "REJECTED_ACTION", "factKey": "latest_rejected_action", "factValue": answer[:240]})
     if citations:
-        facts.append({"factType": "REFERENCE", "factKey": "last_citation_count", "factValue": str(len(citations))})
+        facts.append({"factType": "FACT", "factKey": "last_citation_count", "factValue": str(len(citations))})
+    if not answer:
+        facts.append({"factType": "PENDING_TASK", "factKey": "follow_up_needed", "factValue": trimmed_question[:120] if trimmed_question else "follow_up_needed"})
     return facts
 
 

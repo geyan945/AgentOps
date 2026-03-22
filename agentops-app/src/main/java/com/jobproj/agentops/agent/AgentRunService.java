@@ -3,11 +3,15 @@ package com.jobproj.agentops.agent;
 import com.jobproj.agentops.common.BusinessException;
 import com.jobproj.agentops.common.ErrorCode;
 import com.jobproj.agentops.dto.agent.AgentGraphResponse;
+import com.jobproj.agentops.dto.agent.AgentRunEventResponse;
 import com.jobproj.agentops.dto.agent.AgentRunRequest;
+import com.jobproj.agentops.dto.agent.AgentRunReplayRequest;
 import com.jobproj.agentops.dto.agent.AgentRunResponse;
 import com.jobproj.agentops.dto.agent.AgentRunResumeRequest;
 import com.jobproj.agentops.dto.agent.AgentRunStepResponse;
 import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeCheckpointResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeReplayRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeResumeRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeStartRunRequest;
 import com.jobproj.agentops.entity.AgentHumanTask;
@@ -18,6 +22,7 @@ import com.jobproj.agentops.repository.AgentRunRepository;
 import com.jobproj.agentops.repository.AgentRunStepRepository;
 import com.jobproj.agentops.runtime.AgentGraphService;
 import com.jobproj.agentops.runtime.AgentHumanTaskService;
+import com.jobproj.agentops.runtime.AgentRunEventService;
 import com.jobproj.agentops.runtime.RuntimeCheckpointService;
 import com.jobproj.agentops.runtime.RuntimeClient;
 import com.jobproj.agentops.service.RateLimitService;
@@ -30,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
 @RequiredArgsConstructor
@@ -43,6 +49,7 @@ public class AgentRunService {
     private final AgentGraphService agentGraphService;
     private final AgentHumanTaskService humanTaskService;
     private final RuntimeCheckpointService runtimeCheckpointService;
+    private final AgentRunEventService agentRunEventService;
 
     @Value("${agent.runtime.default-graph-name:enterprise-copilot}")
     private String defaultGraphName;
@@ -64,6 +71,7 @@ public class AgentRunService {
         run.setRuntimeType("LANGGRAPH");
         run.setExecutionMode(normalizeOrDefault(request.getExecutionMode(), "USER"));
         run.setApprovalPolicy(normalizeOrDefault(request.getApprovalPolicy(), "MANUAL"));
+        run.setOrchestrationMode(normalizeOrDefault(request.getOrchestrationMode(), "SINGLE_GRAPH"));
         run.setGraphName(defaultGraphName);
         run.setGraphVersion(defaultGraphVersion);
         run.setCurrentNode("intake_guardrail");
@@ -78,10 +86,14 @@ public class AgentRunService {
                     .userInput(request.getMessage())
                     .executionMode(run.getExecutionMode())
                     .approvalPolicy(run.getApprovalPolicy())
+                    .orchestrationMode(run.getOrchestrationMode())
                     .waitForCompletion(false)
                     .build());
             run.setStatus(response == null || !response.isAccepted() ? "RUNNING" : response.getStatus());
             run.setCurrentNode(response == null ? "intake_guardrail" : response.getCurrentNode());
+            if (response != null && response.getOrchestrationMode() != null) {
+                run.setOrchestrationMode(response.getOrchestrationMode());
+            }
             agentRunRepository.save(run);
         } catch (Exception ex) {
             markRunFailed(run, "启动 runtime 失败: " + ex.getMessage());
@@ -126,6 +138,40 @@ public class AgentRunService {
         return getRun(userId, runId);
     }
 
+    @Transactional
+    public AgentRunResponse replay(Long userId, Long runId, AgentRunReplayRequest request) {
+        AgentRun run = getRequiredRun(userId, runId);
+        RuntimeCheckpointResponse checkpoint = runtimeCheckpointService.getCheckpoint(runId);
+        if (Boolean.TRUE.equals(checkpoint.getRequiresHuman())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "当前 run 正在等待人工审批，请使用 resume 而不是 replay");
+        }
+        if (request.getCheckpointVersion() != null && !request.getCheckpointVersion().equals(checkpoint.getCheckpointVersion())) {
+            throw new BusinessException(ErrorCode.INVALID_RESUME_TOKEN, "checkpoint version 已变化，请刷新后重试");
+        }
+        run.setStatus("RUNNING");
+        run.setRequiresHuman(false);
+        run.setReplayRecovered(Boolean.TRUE);
+        agentRunRepository.save(run);
+        try {
+            RuntimeCommandResponse response = runtimeClient.replayRun(RuntimeReplayRunRequest.builder()
+                    .runId(runId)
+                    .checkpointVersion(checkpoint.getCheckpointVersion())
+                    .waitForCompletion(false)
+                    .build());
+            if (response != null) {
+                run.setStatus(response.getStatus());
+                run.setCurrentNode(response.getCurrentNode());
+                if (response.getCheckpointVersion() != null) {
+                    run.setCheckpointVersion(response.getCheckpointVersion());
+                }
+                agentRunRepository.save(run);
+            }
+        } catch (Exception ex) {
+            markRunFailed(run, "checkpoint replay 失败: " + ex.getMessage());
+        }
+        return getRun(userId, runId);
+    }
+
     @Transactional(readOnly = true)
     public AgentRunResponse getRun(Long userId, Long runId) {
         AgentRun run = getRequiredRun(userId, runId);
@@ -139,15 +185,20 @@ public class AgentRunService {
                 .runtimeType(run.getRuntimeType())
                 .executionMode(run.getExecutionMode())
                 .approvalPolicy(run.getApprovalPolicy())
+                .orchestrationMode(run.getOrchestrationMode())
                 .graphName(run.getGraphName())
                 .graphVersion(run.getGraphVersion())
                 .currentNode(run.getCurrentNode())
                 .requiresHuman(run.getRequiresHuman())
                 .resumeToken(run.getResumeToken())
                 .checkpointVersion(run.getCheckpointVersion())
+                .lastEventSequence(run.getLastEventSequence())
                 .finalAnswer(run.getFinalAnswer())
                 .artifactsJson(run.getArtifactsJson())
                 .citationsJson(run.getCitationsJson())
+                .costUsageJson(run.getCostUsageJson())
+                .approvalReason(run.getApprovalReason())
+                .replayRecovered(run.getReplayRecovered())
                 .totalSteps(run.getTotalSteps())
                 .totalLatencyMs(run.getTotalLatencyMs())
                 .errorMessage(run.getErrorMessage())
@@ -162,6 +213,18 @@ public class AgentRunService {
     public List<AgentRunStepResponse> listSteps(Long userId, Long runId) {
         getRequiredRun(userId, runId);
         return agentRunStepRepository.findByRunIdOrderByStepNoAsc(runId).stream().map(this::toStepResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<AgentRunEventResponse> listEvents(Long userId, Long runId) {
+        getRequiredRun(userId, runId);
+        return agentRunEventService.listEvents(runId);
+    }
+
+    @Transactional(readOnly = true)
+    public SseEmitter subscribeEvents(Long userId, Long runId) {
+        getRequiredRun(userId, runId);
+        return agentRunEventService.subscribe(userId, runId);
     }
 
     @Transactional(readOnly = true)
@@ -183,13 +246,21 @@ public class AgentRunService {
                 .nodeId(step.getNodeId())
                 .nodeLabel(step.getNodeLabel())
                 .toolName(step.getToolName())
+                .eventSequence(step.getEventSequence())
                 .attemptNo(step.getAttemptNo())
                 .parentStepId(step.getParentStepId())
+                .skillName(step.getSkillName())
+                .skillType(step.getSkillType())
+                .riskLevel(step.getRiskLevel())
+                .approvalPolicy(step.getApprovalPolicy())
+                .approvalReason(step.getApprovalReason())
+                .retryReason(step.getRetryReason())
                 .inputJson(step.getInputJson())
                 .outputJson(step.getOutputJson())
                 .stateBeforeJson(step.getStateBeforeJson())
                 .stateAfterJson(step.getStateAfterJson())
                 .observationJson(step.getObservationJson())
+                .costUsageJson(step.getCostUsageJson())
                 .latencyMs(step.getLatencyMs())
                 .modelName(step.getModelName())
                 .promptVersion(step.getPromptVersion())

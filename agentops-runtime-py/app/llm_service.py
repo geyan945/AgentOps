@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple
 from pydantic import BaseModel, Field
 
 from .config import settings
-from .planner import build_answer, classify_route
+from .planner import build_answer, classify_adaptive_route
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -59,17 +59,7 @@ class GeminiLLMService:
     def plan(self, state: Dict[str, Any]) -> Tuple[SupervisorPlanOutput, Dict[str, Any]]:
         if not self.gemini_available:
             return self._mock_plan(state), {"mode": self.mode, "retryCount": 0}
-        prompt = (
-            "You are the AgentOps supervisor planner.\n"
-            "Return JSON only with keys route, pendingTasks, needsHuman, reason, confidence, directAnswerAllowed.\n"
-            "Allowed route values: direct, knowledge, data, mixed.\n"
-            "Allowed pendingTasks values: knowledge_researcher, data_analyst.\n"
-            f"UserInput: {state.get('userInput', '')}\n"
-            f"ConversationSummary: {state.get('conversationSummary', '')}\n"
-            f"ReviewFeedback: {state.get('reviewFeedback', '')}\n"
-            f"CompletedTools: {[item.get('toolName') for item in state.get('toolTrace', [])]}\n"
-            f"CurrentLoop: {state.get('loopCount', 0)}"
-        )
+        prompt = self._build_plan_prompt(state)
         return self._invoke_json(prompt, SupervisorPlanOutput, self._mock_plan, state)
 
     def review(self, state: Dict[str, Any]) -> Tuple[ReviewerOutput, Dict[str, Any]]:
@@ -121,7 +111,8 @@ class GeminiLLMService:
         return fallback_result, {"mode": "mock-fallback", "retryCount": retries + 1, "lastError": last_error or "unknown", "latencyMs": 1}
 
     def _mock_plan(self, state: Dict[str, Any]) -> SupervisorPlanOutput:
-        route = classify_route(state.get("userInput", ""), state.get("reviewFeedback"))
+        adaptive_route = classify_adaptive_route(state.get("userInput", ""), state.get("reviewFeedback"))
+        route = adaptive_route["route"]
         completed_tools = {item.get("toolName") for item in state.get("toolTrace", [])}
         if route == "direct":
             pending = []
@@ -139,9 +130,28 @@ class GeminiLLMService:
             route=route,
             pendingTasks=pending,
             needsHuman=False,
-            reason="mock planner route selection",
+            reason=adaptive_route["routingReason"],
             confidence=0.86 if route != "direct" else 0.98,
             directAnswerAllowed=route == "direct",
+        )
+
+    def _build_plan_prompt(self, state: Dict[str, Any]) -> str:
+        return (
+            "You are the AgentOps supervisor planner.\n"
+            "Use Chain-of-Draft internally: think in minimal telegraphic keywords only, never full sentences.\n"
+            "Do not reveal reasoning, scratchpad, or draft content.\n"
+            "Prefer the smallest sufficient plan and avoid creating extra steps for single-hop requests.\n"
+            "Return JSON only with keys route, pendingTasks, needsHuman, reason, confidence, directAnswerAllowed.\n"
+            "Allowed route values: direct, knowledge, data, mixed.\n"
+            "Allowed pendingTasks values: knowledge_researcher, data_analyst.\n"
+            f"AdaptiveRouteHint: {state.get('route', '')}\n"
+            f"AdaptiveComplexity: {state.get('queryComplexity', '')}\n"
+            f"AdaptiveRoutingReason: {state.get('routingReason', '')}\n"
+            f"UserInput: {state.get('userInput', '')}\n"
+            f"ConversationSummary: {state.get('conversationSummary', '')}\n"
+            f"ReviewFeedback: {state.get('reviewFeedback', '')}\n"
+            f"CompletedTools: {[item.get('toolName') for item in state.get('toolTrace', [])]}\n"
+            f"CurrentLoop: {state.get('loopCount', 0)}"
         )
 
     def _mock_review(self, state: Dict[str, Any]) -> ReviewerOutput:

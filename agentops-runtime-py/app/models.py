@@ -81,6 +81,10 @@ class AgentState(TypedDict, total=False):
     resumeAfterNode: Optional[str]
     resumeToken: Optional[str]
     route: Literal["direct", "knowledge", "data", "mixed"]
+    queryComplexity: Literal["DIRECT", "SINGLE_HOP", "MULTI_STEP"]
+    routingReason: str
+    planningMode: Literal["ADAPTIVE_FAST_PATH", "LLM_PLANNER"]
+    plannerBypass: bool
     needsHuman: bool
     approvalPolicy: str
     executionMode: str

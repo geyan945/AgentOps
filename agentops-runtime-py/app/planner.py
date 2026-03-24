@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, TypedDict
+
+
+class AdaptiveRouteDecision(TypedDict):
+    route: Literal["direct", "knowledge", "data", "mixed"]
+    queryComplexity: Literal["DIRECT", "SINGLE_HOP", "MULTI_STEP"]
+    pendingTasks: List[str]
+    plannerBypass: bool
+    routingReason: str
 
 
 def is_greeting(message: str) -> bool:
@@ -8,23 +16,92 @@ def is_greeting(message: str) -> bool:
     return any(token in lowered for token in ["hello", "hi", "你好", "您好"])
 
 
-def classify_route(message: str, review_feedback: str | None = None) -> str:
+def classify_adaptive_route(message: str, review_feedback: str | None = None) -> AdaptiveRouteDecision:
     lowered = (message or "").lower()
-    if is_greeting(lowered):
-        return "direct"
     has_data = any(token in lowered for token in ["统计", "count", "多少", "数量", "sql", "报表", "趋势"])
-    has_knowledge = any(token in lowered for token in ["文档", "知识", "kb", "agent", "设计", "流程", "what", "how", "explain", "总结", "总结下"])
+    has_knowledge_entity = any(token in lowered for token in ["文档", "知识", "kb", "agent"])
+    has_knowledge_action = any(token in lowered for token in ["设计", "流程", "what", "how", "explain", "总结", "总结下", "介绍", "说明"])
+    has_knowledge = has_knowledge_entity or has_knowledge_action
+    multi_step_hint = any(
+        token in lowered
+        for token in [
+            "对比",
+            "比较",
+            "区别",
+            "difference",
+            "vs",
+            "原因",
+            "why",
+            "根因",
+            "先",
+            "然后",
+            "并分析",
+            "分析并",
+            "并总结",
+            "总结并",
+            "综合",
+        ]
+    )
+    route = _route_from_signals(has_data, has_knowledge)
+    if is_greeting(lowered):
+        return {
+            "route": "direct",
+            "queryComplexity": "DIRECT",
+            "pendingTasks": [],
+            "plannerBypass": True,
+            "routingReason": "greeting_or_low_risk_chat",
+        }
     if review_feedback and "insufficient" in review_feedback.lower():
-        if has_data and has_knowledge:
-            return "mixed"
-        if has_data:
-            return "data"
-        return "knowledge"
+        return {
+            "route": route,
+            "queryComplexity": "MULTI_STEP",
+            "pendingTasks": _pending_tasks_for_route(route),
+            "plannerBypass": False,
+            "routingReason": "review_feedback_requires_replan",
+        }
+    if has_data and has_knowledge_entity and not has_knowledge_action and not multi_step_hint:
+        return {
+            "route": "data",
+            "queryComplexity": "SINGLE_HOP",
+            "pendingTasks": ["data_analyst"],
+            "plannerBypass": True,
+            "routingReason": "data_query_with_knowledge_domain_entities",
+        }
     if has_data and has_knowledge:
-        return "mixed"
+        return {
+            "route": "mixed",
+            "queryComplexity": "MULTI_STEP",
+            "pendingTasks": _pending_tasks_for_route("mixed"),
+            "plannerBypass": False,
+            "routingReason": "knowledge_and_data_signals_detected",
+        }
+    if multi_step_hint:
+        return {
+            "route": route,
+            "queryComplexity": "MULTI_STEP",
+            "pendingTasks": _pending_tasks_for_route(route),
+            "plannerBypass": False,
+            "routingReason": "multi_step_reasoning_hint_detected",
+        }
     if has_data:
-        return "data"
-    return "knowledge"
+        return {
+            "route": "data",
+            "queryComplexity": "SINGLE_HOP",
+            "pendingTasks": ["data_analyst"],
+            "plannerBypass": True,
+            "routingReason": "single_intent_data_query",
+        }
+    return {
+        "route": "knowledge",
+        "queryComplexity": "SINGLE_HOP",
+        "pendingTasks": ["knowledge_researcher"],
+        "plannerBypass": True,
+        "routingReason": "single_intent_knowledge_query",
+    }
+
+
+def classify_route(message: str, review_feedback: str | None = None) -> str:
+    return classify_adaptive_route(message, review_feedback)["route"]
 
 
 def build_sql_arguments(message: str) -> Dict[str, Any]:
@@ -65,3 +142,21 @@ def build_answer(message: str, evidence: List[Dict[str, Any]], citations: List[D
         cite_text = "、".join(str(item.get("documentId") or item.get("source") or item.get("chunkId")) for item in citations[:5])
         lines.append(f"引用来源：{cite_text}")
     return "\n".join(lines)
+
+
+def _route_from_signals(has_data: bool, has_knowledge: bool) -> Literal["knowledge", "data", "mixed"]:
+    if has_data and has_knowledge:
+        return "mixed"
+    if has_data:
+        return "data"
+    return "knowledge"
+
+
+def _pending_tasks_for_route(route: str) -> List[str]:
+    if route == "knowledge":
+        return ["knowledge_researcher"]
+    if route == "data":
+        return ["data_analyst"]
+    if route == "mixed":
+        return ["knowledge_researcher", "data_analyst"]
+    return []

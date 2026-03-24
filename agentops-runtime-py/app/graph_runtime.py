@@ -19,7 +19,7 @@ from .models import (
     StatusPayload,
     StepPayload,
 )
-from .planner import build_memory_facts, build_sql_arguments, classify_route, is_greeting
+from .planner import build_memory_facts, build_sql_arguments, classify_adaptive_route, classify_route
 
 try:
     from langchain_core.tools import StructuredTool
@@ -279,6 +279,10 @@ class AgentRuntime:
             "resumeAfterNode": None,
             "resumeToken": None,
             "route": "knowledge",
+            "queryComplexity": "MULTI_STEP",
+            "routingReason": "",
+            "planningMode": "LLM_PLANNER",
+            "plannerBypass": False,
             "needsHuman": False,
             "approvalPolicy": (request.approvalPolicy or "MANUAL").upper(),
             "executionMode": (request.executionMode or "USER").upper(),
@@ -338,9 +342,26 @@ class AgentRuntime:
 
     def _intake_guardrail(self, state: AgentState) -> AgentState:
         before = deepcopy(state)
-        state["route"] = "direct" if is_greeting(state["userInput"]) else classify_route(state["userInput"])
+        adaptive_route = classify_adaptive_route(state["userInput"], state.get("reviewFeedback"))
+        state["route"] = adaptive_route["route"]
+        state["queryComplexity"] = adaptive_route["queryComplexity"]
+        state["routingReason"] = adaptive_route["routingReason"]
+        state["plannerBypass"] = adaptive_route["plannerBypass"]
+        state["planningMode"] = "ADAPTIVE_FAST_PATH" if adaptive_route["plannerBypass"] else "LLM_PLANNER"
         state["currentNode"] = "load_memory"
-        self._save_graph_step(state, before, {"route": state["route"]}, "intake_guardrail", "Intake Guardrail")
+        self._save_graph_step(
+            state,
+            before,
+            {
+                "route": state["route"],
+                "queryComplexity": state.get("queryComplexity"),
+                "routingReason": state.get("routingReason"),
+                "plannerBypass": state.get("plannerBypass"),
+                "planningMode": state.get("planningMode"),
+            },
+            "intake_guardrail",
+            "Intake Guardrail",
+        )
         self._save_checkpoint(state, status="RUNNING")
         return state
 
@@ -360,35 +381,74 @@ class AgentRuntime:
 
     def _supervisor_plan(self, state: AgentState) -> AgentState:
         before = deepcopy(state)
-        plan_result, llm_meta = self.llm.plan(state)
-        route = self._normalize_route(plan_result.route, state)
-        pending = self._normalize_pending_tasks(route, plan_result.pendingTasks, state)
-        state["route"] = route
-        state["pendingTasks"] = pending
-        state["taskPlan"] = [{
-            "route": route,
-            "pendingTasks": pending,
-            "reason": plan_result.reason,
-            "confidence": plan_result.confidence,
-            "orchestrationMode": state.get("orchestrationMode"),
-        }]
-        state["confidence"] = max(0.0, min(1.0, plan_result.confidence))
-        state["needsHuman"] = bool(plan_result.needsHuman)
-        state["currentNode"] = "evidence_reviewer" if route == "direct" or not pending else pending[0]
-        self._save_model_step(
-            state,
-            before,
-            "supervisor_plan",
-            "Supervisor Plan Model",
-            {"userInput": state["userInput"], "reviewFeedback": state.get("reviewFeedback", ""), "memoryFacts": state.get("memoryFacts", [])[:4]},
-            plan_result.model_dump(),
-            llm_meta,
-            "supervisor-v2.2",
-        )
+        if self._should_bypass_planner(state):
+            route = state.get("route") or classify_route(state.get("userInput", ""), state.get("reviewFeedback"))
+            pending = self._normalize_pending_tasks(route, self._adaptive_pending_tasks(route), state)
+            state["pendingTasks"] = pending
+            state["planningMode"] = "ADAPTIVE_FAST_PATH"
+            state["taskPlan"] = [{
+                "route": route,
+                "pendingTasks": pending,
+                "reason": state.get("routingReason"),
+                "confidence": self._adaptive_confidence(state),
+                "orchestrationMode": state.get("orchestrationMode"),
+                "queryComplexity": state.get("queryComplexity"),
+                "plannerBypass": True,
+                "planningMode": state.get("planningMode"),
+            }]
+            state["confidence"] = self._adaptive_confidence(state)
+            state["needsHuman"] = False
+            state["currentNode"] = "evidence_reviewer" if route == "direct" or not pending else pending[0]
+        else:
+            state["planningMode"] = "LLM_PLANNER"
+            state["plannerBypass"] = False
+            plan_result, llm_meta = self.llm.plan(state)
+            route = self._normalize_route(plan_result.route, state)
+            pending = self._normalize_pending_tasks(route, plan_result.pendingTasks, state)
+            state["route"] = route
+            state["pendingTasks"] = pending
+            state["taskPlan"] = [{
+                "route": route,
+                "pendingTasks": pending,
+                "reason": plan_result.reason,
+                "confidence": plan_result.confidence,
+                "orchestrationMode": state.get("orchestrationMode"),
+                "queryComplexity": state.get("queryComplexity"),
+                "plannerBypass": False,
+                "planningMode": state.get("planningMode"),
+            }]
+            state["confidence"] = max(0.0, min(1.0, plan_result.confidence))
+            state["needsHuman"] = bool(plan_result.needsHuman)
+            state["currentNode"] = "evidence_reviewer" if route == "direct" or not pending else pending[0]
+            self._save_model_step(
+                state,
+                before,
+                "supervisor_plan",
+                "Supervisor Plan Model",
+                {
+                    "userInput": state["userInput"],
+                    "reviewFeedback": state.get("reviewFeedback", ""),
+                    "memoryFacts": state.get("memoryFacts", [])[:4],
+                    "queryComplexity": state.get("queryComplexity"),
+                    "routingReason": state.get("routingReason"),
+                },
+                plan_result.model_dump(),
+                llm_meta,
+                "supervisor-v2.3-adaptive-cod",
+            )
         self._save_graph_step(
             state,
             before,
-            {"route": route, "pendingTasks": pending, "confidence": state["confidence"], "teamGraph": self._is_team_graph(state)},
+            {
+                "route": route,
+                "pendingTasks": pending,
+                "confidence": state["confidence"],
+                "teamGraph": self._is_team_graph(state),
+                "queryComplexity": state.get("queryComplexity"),
+                "routingReason": state.get("routingReason"),
+                "plannerBypass": state.get("plannerBypass"),
+                "planningMode": state.get("planningMode"),
+            },
             "supervisor_plan",
             "Supervisor Plan",
         )
@@ -465,6 +525,10 @@ class AgentRuntime:
         if not review_result.grounded and state["route"] != "direct":
             if state.get("reviewCount", 0) < settings.max_replans and review_result.needsReplan:
                 state["reviewCount"] = state.get("reviewCount", 0) + 1
+                state["queryComplexity"] = "MULTI_STEP"
+                state["plannerBypass"] = False
+                state["planningMode"] = "LLM_PLANNER"
+                state["routingReason"] = "review_feedback_requires_replan"
                 state["currentNode"] = "supervisor_plan"
                 self._save_graph_step(state, before, {"decision": "replan", "reviewCount": state["reviewCount"], "reviewFeedback": review_result.reviewFeedback}, "evidence_reviewer", "Evidence Reviewer", step_type="REVIEW")
                 self._save_checkpoint(state, status="RUNNING")
@@ -761,6 +825,10 @@ class AgentRuntime:
         return {
             "currentNode": state.get("currentNode"),
             "route": state.get("route"),
+            "queryComplexity": state.get("queryComplexity"),
+            "routingReason": state.get("routingReason"),
+            "planningMode": state.get("planningMode"),
+            "plannerBypass": state.get("plannerBypass"),
             "loopCount": state.get("loopCount"),
             "reviewCount": state.get("reviewCount"),
             "toolLoopCount": state.get("toolLoopCount"),
@@ -800,6 +868,31 @@ class AgentRuntime:
         if not self._has_sql_trace(state):
             result.append("data_analyst")
         return result or normalized
+
+    def _should_bypass_planner(self, state: AgentState) -> bool:
+        return bool(
+            state.get("plannerBypass")
+            and not state.get("toolTrace")
+            and not state.get("reviewFeedback")
+            and state.get("humanDecision") is None
+        )
+
+    def _adaptive_pending_tasks(self, route: str) -> List[str]:
+        if route == "knowledge":
+            return ["knowledge_researcher"]
+        if route == "data":
+            return ["data_analyst"]
+        if route == "mixed":
+            return ["knowledge_researcher", "data_analyst"]
+        return []
+
+    def _adaptive_confidence(self, state: AgentState) -> float:
+        complexity = (state.get("queryComplexity") or "").upper()
+        if complexity == "DIRECT":
+            return 0.99
+        if complexity == "SINGLE_HOP":
+            return 0.9
+        return 0.76
 
     def _requires_human_for_sql(self, message: str) -> bool:
         lowered = (message or "").lower()

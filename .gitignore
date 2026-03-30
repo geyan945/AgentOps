@@ -1,4 +1,4 @@
-﻿# Root ignores
+# Root ignores
 .vscode/
 .idea/
 *.iml
@@ -23,4 +23,5 @@ Thumbs.db
 # Python runtime
 **/__pycache__/
 **/.pytest_cache/
+**/pytest-cache-files-*/
 *.pyc

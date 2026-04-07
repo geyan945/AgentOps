@@ -254,6 +254,8 @@ class AgentRuntime:
             "runId": request.runId,
             "sessionId": request.sessionId,
             "userId": request.userId,
+            "tenantId": request.tenantId if request.tenantId is not None else context.get("tenantId"),
+            "userRole": context.get("role"),
             "userInput": request.userInput,
             "conversationSummary": context.get("conversationSummary") or "",
             "memoryFacts": context.get("memoryFacts") or [],
@@ -630,7 +632,14 @@ class AgentRuntime:
     def _invoke_tool(self, state: AgentState, tool_name: str, arguments: Dict[str, Any], *, parent_node: str) -> Dict[str, Any]:
         before = deepcopy(state)
         started = time.perf_counter()
-        result = self._tools[tool_name].invoke(arguments)
+        result = self.client.call_tool(
+            tool_name,
+            arguments,
+            user_id=state["userId"],
+            tenant_id=state.get("tenantId"),
+            session_id=state["sessionId"],
+            run_id=state["runId"],
+        )
         state["toolLoopCount"] = state.get("toolLoopCount", 0) + 1
         latency_ms = int((time.perf_counter() - started) * 1000)
         governance = TOOL_GOVERNANCE.get(tool_name, {})
@@ -824,6 +833,8 @@ class AgentRuntime:
     def _minify_state(self, state: AgentState) -> Dict[str, Any]:
         return {
             "currentNode": state.get("currentNode"),
+            "tenantId": state.get("tenantId"),
+            "userRole": state.get("userRole"),
             "route": state.get("route"),
             "queryComplexity": state.get("queryComplexity"),
             "routingReason": state.get("routingReason"),

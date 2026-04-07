@@ -13,9 +13,13 @@ public class InternalAccessService {
     private String internalApiKey;
 
     public void assertAuthorized(String providedKey) {
-        if (!StringUtils.hasText(providedKey) || !internalApiKey.equals(providedKey)) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "内部接口访问失败");
+        if (!isAuthorized(providedKey)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "internal access denied");
         }
+    }
+
+    public boolean isAuthorized(String providedKey) {
+        return StringUtils.hasText(providedKey) && internalApiKey.equals(providedKey);
     }
 
     public String getInternalApiKey() {

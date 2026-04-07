@@ -3,6 +3,8 @@ package com.jobproj.agentops.mcp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.jobproj.agentops.common.ApiResponse;
 import com.jobproj.agentops.dto.agent.ToolInfoResponse;
+import com.jobproj.agentops.runtime.InternalAccessService;
+import com.jobproj.agentops.web.RequestIdHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -17,7 +19,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class McpHttpClient {
 
-    @Value("${agent.mcp.base-url:http://localhost:18084/api/mcp}")
+    private final InternalAccessService internalAccessService;
+
+    @Value("${agent.mcp.base-url:http://localhost:18084/internal/mcp}")
     private String baseUrl;
 
     private RestClient buildClient() {
@@ -28,6 +32,8 @@ public class McpHttpClient {
         ApiResponse<McpInitializeResponse> response = buildClient()
                 .post()
                 .uri("/initialize")
+                .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .header(RequestIdHolder.HEADER_NAME, RequestIdHolder.currentOrGenerate())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body("{}")
                 .retrieve()
@@ -39,6 +45,8 @@ public class McpHttpClient {
         ApiResponse<ToolInfoResponse[]> response = buildClient()
                 .get()
                 .uri("/tools")
+                .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .header(RequestIdHolder.HEADER_NAME, RequestIdHolder.currentOrGenerate())
                 .retrieve()
                 .body(new ParameterizedTypeReference<ApiResponse<ToolInfoResponse[]>>() {});
         if (response == null || response.getData() == null) {
@@ -54,6 +62,8 @@ public class McpHttpClient {
         ApiResponse<McpToolCallResponse> response = buildClient()
                 .post()
                 .uri("/tools/call")
+                .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .header(RequestIdHolder.HEADER_NAME, RequestIdHolder.currentOrGenerate())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()

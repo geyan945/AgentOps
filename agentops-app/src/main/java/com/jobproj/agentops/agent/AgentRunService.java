@@ -4,13 +4,13 @@ import com.jobproj.agentops.common.BusinessException;
 import com.jobproj.agentops.common.ErrorCode;
 import com.jobproj.agentops.dto.agent.AgentGraphResponse;
 import com.jobproj.agentops.dto.agent.AgentRunEventResponse;
-import com.jobproj.agentops.dto.agent.AgentRunRequest;
 import com.jobproj.agentops.dto.agent.AgentRunReplayRequest;
+import com.jobproj.agentops.dto.agent.AgentRunRequest;
 import com.jobproj.agentops.dto.agent.AgentRunResponse;
 import com.jobproj.agentops.dto.agent.AgentRunResumeRequest;
 import com.jobproj.agentops.dto.agent.AgentRunStepResponse;
-import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
 import com.jobproj.agentops.dto.runtime.RuntimeCheckpointResponse;
+import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
 import com.jobproj.agentops.dto.runtime.RuntimeReplayRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeResumeRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeStartRunRequest;
@@ -31,11 +31,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
 @RequiredArgsConstructor
@@ -67,6 +67,7 @@ public class AgentRunService {
         AgentRun run = new AgentRun();
         run.setSessionId(session.getId());
         run.setUserId(userId);
+        run.setTenantId(session.getTenantId());
         run.setUserInput(request.getMessage());
         run.setRuntimeType("LANGGRAPH");
         run.setExecutionMode(normalizeOrDefault(request.getExecutionMode(), "USER"));
@@ -83,6 +84,7 @@ public class AgentRunService {
                     .runId(run.getId())
                     .sessionId(run.getSessionId())
                     .userId(userId)
+                    .tenantId(run.getTenantId())
                     .userInput(request.getMessage())
                     .executionMode(run.getExecutionMode())
                     .approvalPolicy(run.getApprovalPolicy())
@@ -117,10 +119,11 @@ public class AgentRunService {
             String resumeToken = request.getResumeToken() != null ? request.getResumeToken() : run.getResumeToken();
             Integer checkpointVersion = request.getCheckpointVersion() != null ? request.getCheckpointVersion() : run.getCheckpointVersion();
             if (resumeToken == null || checkpointVersion == null) {
-                throw new BusinessException(ErrorCode.INVALID_RESUME_TOKEN, "当前 run 缺少可恢复 checkpoint");
+                throw new BusinessException(ErrorCode.INVALID_RESUME_TOKEN, "current run has no resumable checkpoint");
             }
             RuntimeCommandResponse response = runtimeClient.resumeRun(RuntimeResumeRunRequest.builder()
                     .runId(runId)
+                    .tenantId(run.getTenantId())
                     .decision(request.getDecision())
                     .comment(request.getComment())
                     .resumeToken(resumeToken)
@@ -155,6 +158,7 @@ public class AgentRunService {
         try {
             RuntimeCommandResponse response = runtimeClient.replayRun(RuntimeReplayRunRequest.builder()
                     .runId(runId)
+                    .tenantId(run.getTenantId())
                     .checkpointVersion(checkpoint.getCheckpointVersion())
                     .waitForCompletion(false)
                     .build());

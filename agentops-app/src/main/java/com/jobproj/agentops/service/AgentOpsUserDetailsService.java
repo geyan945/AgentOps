@@ -18,7 +18,15 @@ public class AgentOpsUserDetailsService implements UserDetailsService {
     @Override
     public UserDetails loadUserByUsername(String username) {
         return userRepository.findByUsername(username)
-                .map(user -> new JwtUserDetails(user.getId(), user.getUsername(), user.getPasswordHash(), user.getRole(), user.getStatus()))
+                .map(user -> new JwtUserDetails(
+                        user.getId(),
+                        user.getTenantId(),
+                        user.getUsername(),
+                        user.getPasswordHash(),
+                        user.getRole(),
+                        user.getStatus(),
+                        user.getTokenVersion()
+                ))
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
     }
 }

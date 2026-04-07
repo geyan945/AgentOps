@@ -11,12 +11,14 @@ import com.jobproj.agentops.dto.agent.AgentRunResumeRequest;
 import com.jobproj.agentops.dto.agent.AgentRunStepResponse;
 import com.jobproj.agentops.dto.agent.ToolInfoResponse;
 import com.jobproj.agentops.security.SecurityUtils;
-import com.jobproj.agentops.tool.ToolRegistry;
+import com.jobproj.agentops.tool.ToolContext;
+import com.jobproj.agentops.tool.ToolGovernanceService;
+import com.jobproj.agentops.web.RequestIdHolder;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -26,11 +28,17 @@ import java.util.List;
 public class AgentController {
 
     private final AgentRunService agentRunService;
-    private final ToolRegistry toolRegistry;
+    private final ToolGovernanceService toolGovernanceService;
 
     @GetMapping("/tools")
     public ApiResponse<List<ToolInfoResponse>> listTools() {
-        return ApiResponse.success(toolRegistry.listTools());
+        return ApiResponse.success(toolGovernanceService.listTools(ToolContext.builder()
+                .userId(SecurityUtils.currentUserId())
+                .tenantId(SecurityUtils.currentTenantId())
+                .role(SecurityUtils.currentUser().getRole())
+                .source("PUBLIC_API")
+                .requestId(RequestIdHolder.current())
+                .build()));
     }
 
     @PostMapping("/agent/runs")

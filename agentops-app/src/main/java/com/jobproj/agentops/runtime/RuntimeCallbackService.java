@@ -15,8 +15,11 @@ import com.jobproj.agentops.entity.AgentSession;
 import com.jobproj.agentops.repository.AgentMessageRepository;
 import com.jobproj.agentops.repository.AgentRunRepository;
 import com.jobproj.agentops.repository.AgentRunStepRepository;
-import com.jobproj.agentops.tool.ToolRegistry;
+import com.jobproj.agentops.repository.SysUserRepository;
 import com.jobproj.agentops.service.SessionService;
+import com.jobproj.agentops.tool.ToolContext;
+import com.jobproj.agentops.tool.ToolGovernanceService;
+import com.jobproj.agentops.web.RequestIdHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,8 +34,9 @@ public class RuntimeCallbackService {
     private final AgentRunRepository agentRunRepository;
     private final AgentRunStepRepository agentRunStepRepository;
     private final AgentMessageRepository agentMessageRepository;
+    private final SysUserRepository sysUserRepository;
     private final SessionService sessionService;
-    private final ToolRegistry toolRegistry;
+    private final ToolGovernanceService toolGovernanceService;
     private final AgentMemoryService agentMemoryService;
     private final AgentHumanTaskService humanTaskService;
     private final AgentRunEventService agentRunEventService;
@@ -42,7 +46,9 @@ public class RuntimeCallbackService {
     public RuntimeContextResponse buildContext(Long sessionId) {
         AgentSession session = sessionService.getRequiredSessionById(sessionId);
         AgentRun run = agentRunRepository.findBySessionIdOrderByIdDesc(sessionId).stream().findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND, "session 当前没有运行记录"));
+                .orElseThrow(() -> new BusinessException(ErrorCode.RUN_NOT_FOUND, "session has no runtime record"));
+        var user = sysUserRepository.findById(session.getUserId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
         List<RuntimeMessageResponse> messages = agentMessageRepository.findBySessionIdOrderByIdAsc(sessionId).stream()
                 .map(this::toRuntimeMessage)
                 .toList();
@@ -50,12 +56,22 @@ public class RuntimeCallbackService {
                 .runId(run.getId())
                 .sessionId(sessionId)
                 .userId(session.getUserId())
+                .tenantId(session.getTenantId())
+                .role(user.getRole())
                 .userInput(run.getUserInput())
                 .status(run.getStatus())
                 .conversationSummary(sessionService.getSessionSummary(session.getUserId(), sessionId).getSummary())
                 .messages(messages)
                 .memoryFacts(agentMemoryService.listBySessionId(sessionId))
-                .tools(toolRegistry.listTools())
+                .tools(toolGovernanceService.listTools(ToolContext.builder()
+                        .userId(session.getUserId())
+                        .tenantId(session.getTenantId())
+                        .sessionId(sessionId)
+                        .runId(run.getId())
+                        .role(user.getRole())
+                        .source("INTERNAL_RUNTIME")
+                        .requestId(RequestIdHolder.current())
+                        .build()))
                 .build();
     }
 
@@ -101,6 +117,7 @@ public class RuntimeCallbackService {
                     run.getId(),
                     run.getSessionId(),
                     run.getUserId(),
+                    run.getTenantId(),
                     request.getNodeId(),
                     "APPROVAL",
                     "需要人工确认",
@@ -180,7 +197,7 @@ public class RuntimeCallbackService {
             sessionService.saveMessage(run.getSessionId(), "assistant", request.getFinalAnswer(), writeJson(request.getCitations()));
         }
         if (request.getMemoryFacts() != null) {
-            agentMemoryService.replaceFacts(run.getUserId(), run.getSessionId(), runId, request.getMemoryFacts());
+            agentMemoryService.replaceFacts(run.getTenantId(), run.getUserId(), run.getSessionId(), runId, request.getMemoryFacts());
         }
     }
 

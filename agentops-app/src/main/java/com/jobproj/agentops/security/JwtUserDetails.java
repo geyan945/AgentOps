@@ -14,10 +14,12 @@ import java.util.List;
 public class JwtUserDetails implements UserDetails {
 
     private final Long id;
+    private final Long tenantId;
     private final String username;
     private final String password;
     private final String role;
     private final Integer status;
+    private final Integer tokenVersion;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

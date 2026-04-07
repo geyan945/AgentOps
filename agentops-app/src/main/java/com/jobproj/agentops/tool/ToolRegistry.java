@@ -26,14 +26,19 @@ public class ToolRegistry {
     public ToolExecutor getRequired(String toolName) {
         ToolExecutor executor = toolExecutorMap.get(toolName);
         if (executor == null) {
-            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在: " + toolName);
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "tool not found: " + toolName);
         }
         return executor;
     }
 
-    public List<ToolInfoResponse> listTools() {
+    public List<ToolExecutor> listExecutors() {
         return toolExecutorMap.values().stream()
                 .filter(this::shouldExpose)
+                .toList();
+    }
+
+    public List<ToolInfoResponse> listTools() {
+        return listExecutors().stream()
                 .map(tool -> ToolInfoResponse.builder()
                         .name(tool.getName())
                         .description(tool.getDescription())
@@ -44,6 +49,7 @@ public class ToolRegistry {
                         .timeoutBudgetMs(tool.getTimeoutBudgetMs())
                         .retryPolicy(tool.getRetryPolicy())
                         .auditRequired(tool.isAuditRequired())
+                        .enabled(Boolean.TRUE)
                         .build())
                 .toList();
     }

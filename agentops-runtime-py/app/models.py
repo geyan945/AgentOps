@@ -15,6 +15,7 @@ class RuntimeStartRunRequest(BaseModel):
     runId: int
     sessionId: int
     userId: int
+    tenantId: int | None = None
     userInput: str
     executionMode: str = "USER"
     approvalPolicy: str = "MANUAL"
@@ -24,6 +25,7 @@ class RuntimeStartRunRequest(BaseModel):
 
 class RuntimeResumeRunRequest(BaseModel):
     runId: int
+    tenantId: int | None = None
     decision: str
     comment: Optional[str] = None
     resumeToken: Optional[str] = None
@@ -33,6 +35,7 @@ class RuntimeResumeRunRequest(BaseModel):
 
 class RuntimeReplayRunRequest(BaseModel):
     runId: int
+    tenantId: int | None = None
     checkpointVersion: Optional[int] = None
     waitForCompletion: bool = False
 
@@ -57,6 +60,8 @@ class AgentState(TypedDict, total=False):
     runId: int
     sessionId: int
     userId: int
+    tenantId: Optional[int]
+    userRole: Optional[str]
     userInput: str
     conversationSummary: str
     memoryFacts: List[Dict[str, Any]]

@@ -10,6 +10,10 @@ import lombok.Data;
 public class ToolContext {
 
     private Long userId;
+    private Long tenantId;
     private Long sessionId;
     private Long runId;
+    private String role;
+    private String source;
+    private String requestId;
 }

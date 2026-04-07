@@ -22,8 +22,14 @@ public class SysUser {
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Column(nullable = false, length = 32)
     private String role = "USER";
+
+    @Column(name = "token_version", nullable = false)
+    private Integer tokenVersion = 0;
 
     @Column(nullable = false)
     private Integer status = 1;

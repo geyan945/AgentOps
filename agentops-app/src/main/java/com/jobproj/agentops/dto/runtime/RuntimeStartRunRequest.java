@@ -14,6 +14,7 @@ public class RuntimeStartRunRequest {
     private Long runId;
     private Long sessionId;
     private Long userId;
+    private Long tenantId;
     private String userInput;
     private String executionMode;
     private String approvalPolicy;

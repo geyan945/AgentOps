@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: agentops
+      MYSQL_ROOT_PASSWORD: ${AGENTOPS_DB_PASSWORD:-123456}
+    ports:
+      - "3406:3306"
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7.4
+    command: ["redis-server", "--requirepass", "${AGENTOPS_REDIS_PASSWORD:-123456}"]
+    ports:
+      - "16379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${AGENTOPS_RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${AGENTOPS_RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  agentops-app:
+    build:
+      context: ./agentops-app
+    environment:
+      AGENTOPS_DB_URL: jdbc:mysql://mysql:3306/agentops?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      AGENTOPS_DB_USERNAME: root
+      AGENTOPS_DB_PASSWORD: ${AGENTOPS_DB_PASSWORD:-123456}
+      AGENTOPS_REDIS_HOST: redis
+      AGENTOPS_REDIS_PORT: 6379
+      AGENTOPS_REDIS_PASSWORD: ${AGENTOPS_REDIS_PASSWORD:-123456}
+      AGENTOPS_RABBITMQ_HOST: rabbitmq
+      AGENTOPS_RABBITMQ_PORT: 5672
+      AGENTOPS_RABBITMQ_USERNAME: ${AGENTOPS_RABBITMQ_USERNAME:-guest}
+      AGENTOPS_RABBITMQ_PASSWORD: ${AGENTOPS_RABBITMQ_PASSWORD:-guest}
+      AGENTOPS_RUNTIME_BASE_URL: http://agentops-runtime-py:18085
+      AGENTOPS_INTERNAL_KEY: ${AGENTOPS_INTERNAL_KEY:-agentops-dev-internal-key}
+      AGENTOPS_JWT_SECRET: ${AGENTOPS_JWT_SECRET:-agentops-dev-jwt-secret-change-me}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      - mysql
+      - redis
+      - rabbitmq
+      - agentops-runtime-py
+    ports:
+      - "18084:18084"
+
+  agentops-runtime-py:
+    build:
+      context: ./agentops-runtime-py
+    environment:
+      AGENTOPS_CONTROL_PLANE_BASE_URL: http://agentops-app:18084
+      AGENTOPS_INTERNAL_KEY: ${AGENTOPS_INTERNAL_KEY:-agentops-dev-internal-key}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "18085:18085"
+
+  agentops-web:
+    build:
+      context: ./agentops-web
+    depends_on:
+      - agentops-app
+    ports:
+      - "18086:80"
+
+volumes:
+  mysql-data:

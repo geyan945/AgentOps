@@ -5,6 +5,7 @@ import com.jobproj.agentops.dto.runtime.RuntimeCommandResponse;
 import com.jobproj.agentops.dto.runtime.RuntimeReplayRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeResumeRunRequest;
 import com.jobproj.agentops.dto.runtime.RuntimeStartRunRequest;
+import com.jobproj.agentops.web.RequestIdHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -29,6 +30,7 @@ public class RuntimeClient {
         ApiResponse<RuntimeCommandResponse> response = buildClient().post()
                 .uri("/runtime/graphs/enterprise-copilot/runs")
                 .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .header(RequestIdHolder.HEADER_NAME, RequestIdHolder.currentOrGenerate())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()
@@ -40,6 +42,7 @@ public class RuntimeClient {
         ApiResponse<RuntimeCommandResponse> response = buildClient().post()
                 .uri("/runtime/graphs/enterprise-copilot/runs/{runId}/resume", request.getRunId())
                 .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .header(RequestIdHolder.HEADER_NAME, RequestIdHolder.currentOrGenerate())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()
@@ -51,6 +54,7 @@ public class RuntimeClient {
         ApiResponse<RuntimeCommandResponse> response = buildClient().post()
                 .uri("/runtime/graphs/enterprise-copilot/runs/{runId}/replay", request.getRunId())
                 .header("X-AgentOps-Internal-Key", internalAccessService.getInternalApiKey())
+                .header(RequestIdHolder.HEADER_NAME, RequestIdHolder.currentOrGenerate())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()

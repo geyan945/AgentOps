@@ -18,6 +18,7 @@ import java.util.List;
 public class AgentHumanTaskService {
 
     private final AgentHumanTaskRepository humanTaskRepository;
+    private final ApprovalAuditLogService approvalAuditLogService;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
@@ -34,15 +35,16 @@ public class AgentHumanTaskService {
     @Transactional(readOnly = true)
     public AgentHumanTask getPendingTaskByRunId(Long runId) {
         return humanTaskRepository.findFirstByRunIdAndStatusOrderByIdDesc(runId, "PENDING")
-                .orElseThrow(() -> new BusinessException(ErrorCode.HUMAN_TASK_NOT_FOUND, "当前 run 没有待处理人工任务"));
+                .orElseThrow(() -> new BusinessException(ErrorCode.HUMAN_TASK_NOT_FOUND, "pending human task not found"));
     }
 
     @Transactional
-    public AgentHumanTask createPendingTask(Long runId, Long sessionId, Long userId, String currentNode, String taskType, String title, String reason, Object requestPayload) {
+    public AgentHumanTask createPendingTask(Long runId, Long sessionId, Long userId, Long tenantId, String currentNode, String taskType, String title, String reason, Object requestPayload) {
         AgentHumanTask task = humanTaskRepository.findFirstByRunIdAndStatusOrderByIdDesc(runId, "PENDING").orElseGet(AgentHumanTask::new);
         task.setRunId(runId);
         task.setSessionId(sessionId);
         task.setUserId(userId);
+        task.setTenantId(tenantId);
         task.setCurrentNode(currentNode);
         task.setTaskType(taskType);
         task.setTitle(title);
@@ -61,7 +63,9 @@ public class AgentHumanTaskService {
         task.setResponseJson(writeJson(comment));
         task.setDecidedBy(decidedBy);
         task.setDecidedAt(LocalDateTime.now());
-        return humanTaskRepository.save(task);
+        AgentHumanTask saved = humanTaskRepository.save(task);
+        approvalAuditLogService.logDecision(saved, decidedBy, decision, comment);
+        return saved;
     }
 
     public HumanTaskResponse toResponse(AgentHumanTask task) {

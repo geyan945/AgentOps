@@ -25,6 +25,9 @@ public class AgentHumanTask {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Column(name = "task_type", nullable = false, length = 32)
     private String taskType;
 

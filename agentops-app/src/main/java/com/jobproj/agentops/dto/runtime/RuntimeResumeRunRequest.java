@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class RuntimeResumeRunRequest {
 
     private Long runId;
+    private Long tenantId;
     private String decision;
     private String comment;
     private String resumeToken;

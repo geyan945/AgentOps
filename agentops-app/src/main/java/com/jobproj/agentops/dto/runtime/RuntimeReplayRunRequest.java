@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class RuntimeReplayRunRequest {
 
     private Long runId;
+    private Long tenantId;
     private Integer checkpointVersion;
     private boolean waitForCompletion;
 }

@@ -22,6 +22,9 @@ public class AgentMemoryFact {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Column(name = "source_run_id")
     private Long sourceRunId;
 

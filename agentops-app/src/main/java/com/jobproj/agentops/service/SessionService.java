@@ -10,6 +10,7 @@ import com.jobproj.agentops.entity.AgentMessage;
 import com.jobproj.agentops.entity.AgentSession;
 import com.jobproj.agentops.repository.AgentMessageRepository;
 import com.jobproj.agentops.repository.AgentSessionRepository;
+import com.jobproj.agentops.repository.SysUserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,10 +25,12 @@ public class SessionService {
     private final AgentSessionRepository sessionRepository;
     private final AgentMessageRepository messageRepository;
     private final SessionSummaryService sessionSummaryService;
+    private final SysUserRepository userRepository;
 
     @Transactional
     public SessionResponse createSession(Long userId, CreateSessionRequest request) {
         AgentSession session = new AgentSession();
+        session.setTenantId(userRepository.findById(userId).orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND)).getTenantId());
         session.setUserId(userId);
         session.setTitle(StringUtils.hasText(request.getTitle()) ? request.getTitle() : "新会话");
         session.setStatus("ACTIVE");

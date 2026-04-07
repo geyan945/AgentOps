@@ -20,4 +20,6 @@ public class ToolInfoResponse {
     private Integer timeoutBudgetMs;
     private String retryPolicy;
     private Boolean auditRequired;
+    private Boolean enabled;
+    private String requiredRole;
 }

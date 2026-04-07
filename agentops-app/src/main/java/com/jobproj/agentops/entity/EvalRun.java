@@ -22,6 +22,9 @@ public class EvalRun {
     @Column(name = "created_by", nullable = false)
     private Long createdBy;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Column(nullable = false, length = 32)
     private String status;
 

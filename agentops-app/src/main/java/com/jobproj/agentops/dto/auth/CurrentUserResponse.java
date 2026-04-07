@@ -8,6 +8,7 @@ import lombok.Data;
 public class CurrentUserResponse {
 
     private Long id;
+    private Long tenantId;
     private String username;
     private String role;
 }

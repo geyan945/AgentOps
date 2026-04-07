@@ -24,6 +24,7 @@ public class AuthService {
     private final SysUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final TenantBootstrapService tenantBootstrapService;
 
     @Value("${jwt.expire-seconds}")
     private long expireSeconds;
@@ -36,9 +37,10 @@ public class AuthService {
         SysUser user = new SysUser();
         user.setUsername(request.getUsername());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-        user.setRole("USER");
+        user.setRole("ANALYST");
         user.setStatus(1);
-        userRepository.save(user);
+        user.setTokenVersion(0);
+        tenantBootstrapService.ensureUserTenant(userRepository.save(user));
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -47,12 +49,21 @@ public class AuthService {
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.BAD_CREDENTIALS);
         }
-        JwtUserDetails userDetails = new JwtUserDetails(user.getId(), user.getUsername(), user.getPasswordHash(), user.getRole(), user.getStatus());
+        user = tenantBootstrapService.ensureUserTenant(user);
+        JwtUserDetails userDetails = new JwtUserDetails(
+                user.getId(),
+                user.getTenantId(),
+                user.getUsername(),
+                user.getPasswordHash(),
+                user.getRole(),
+                user.getStatus(),
+                user.getTokenVersion()
+        );
         return new AuthResponse(jwtTokenProvider.generateToken(userDetails), expireSeconds);
     }
 
     public CurrentUserResponse currentUser() {
         JwtUserDetails user = SecurityUtils.currentUser();
-        return new CurrentUserResponse(user.getId(), user.getUsername(), user.getRole());
+        return new CurrentUserResponse(user.getId(), user.getTenantId(), user.getUsername(), user.getRole());
     }
 }

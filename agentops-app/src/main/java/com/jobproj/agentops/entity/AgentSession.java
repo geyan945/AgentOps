@@ -19,6 +19,9 @@ public class AgentSession {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Column(nullable = false, length = 255)
     private String title;
 

@@ -26,6 +26,9 @@ public class EvalDataset {
     @Column(name = "created_by", nullable = false)
     private Long createdBy;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

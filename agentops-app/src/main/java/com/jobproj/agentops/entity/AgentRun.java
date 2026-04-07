@@ -22,6 +22,9 @@ public class AgentRun {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
     @Lob
     @Column(name = "user_input", nullable = false, columnDefinition = "MEDIUMTEXT")
     private String userInput;

@@ -27,7 +27,7 @@ public class AgentMemoryService {
     }
 
     @Transactional
-    public void replaceFacts(Long userId, Long sessionId, Long sourceRunId, List<Map<String, Object>> facts) {
+    public void replaceFacts(Long tenantId, Long userId, Long sessionId, Long sourceRunId, List<Map<String, Object>> facts) {
         memoryFactRepository.deleteBySourceRunId(sourceRunId);
         if (facts == null || facts.isEmpty()) {
             return;
@@ -35,6 +35,7 @@ public class AgentMemoryService {
         List<AgentMemoryFact> entities = new ArrayList<>();
         for (Map<String, Object> fact : facts) {
             AgentMemoryFact entity = new AgentMemoryFact();
+            entity.setTenantId(tenantId);
             entity.setUserId(userId);
             entity.setSessionId(sessionId);
             entity.setSourceRunId(sourceRunId);

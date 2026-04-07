@@ -31,6 +31,7 @@ import com.jobproj.agentops.repository.EvalCaseRepository;
 import com.jobproj.agentops.repository.EvalDatasetRepository;
 import com.jobproj.agentops.repository.EvalResultRepository;
 import com.jobproj.agentops.repository.EvalRunRepository;
+import com.jobproj.agentops.repository.SysUserRepository;
 import com.jobproj.agentops.runtime.RuntimeClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,7 @@ public class EvalService {
     private final AgentSessionRepository agentSessionRepository;
     private final AgentRunRepository agentRunRepository;
     private final AgentRunStepRepository agentRunStepRepository;
+    private final SysUserRepository sysUserRepository;
 
     @Transactional
     public EvalDatasetResponse createDataset(Long userId, CreateEvalDatasetRequest request) {
@@ -70,6 +72,7 @@ public class EvalService {
         dataset.setName(request.getName());
         dataset.setDescription(request.getDescription());
         dataset.setCreatedBy(userId);
+        dataset.setTenantId(sysUserRepository.findById(userId).orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND)).getTenantId());
         EvalDataset savedDataset = evalDatasetRepository.save(dataset);
 
         List<EvalCase> cases = new ArrayList<>();
@@ -116,6 +119,7 @@ public class EvalService {
         EvalRun evalRun = new EvalRun();
         evalRun.setDatasetId(dataset.getId());
         evalRun.setCreatedBy(userId);
+        evalRun.setTenantId(dataset.getTenantId());
         evalRun.setStatus("RUNNING");
         evalRun.setTotalCases(cases.size());
         evalRun = evalRunRepository.save(evalRun);
@@ -249,6 +253,7 @@ public class EvalService {
         Instant start = Instant.now();
         AgentSession session = new AgentSession();
         session.setUserId(userId);
+        session.setTenantId(sysUserRepository.findById(userId).orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND)).getTenantId());
         session.setTitle(buildEvalSessionTitle(evalCase.getQuestion()));
         session.setStatus("ACTIVE");
         session = agentSessionRepository.save(session);
@@ -256,6 +261,7 @@ public class EvalService {
         AgentRun run = new AgentRun();
         run.setSessionId(session.getId());
         run.setUserId(userId);
+        run.setTenantId(session.getTenantId());
         run.setUserInput(evalCase.getQuestion());
         run.setStatus("QUEUED");
         run.setRuntimeType("LANGGRAPH");
@@ -272,6 +278,7 @@ public class EvalService {
                     .runId(run.getId())
                     .sessionId(run.getSessionId())
                     .userId(userId)
+                    .tenantId(run.getTenantId())
                     .userInput(evalCase.getQuestion())
                     .executionMode(run.getExecutionMode())
                     .approvalPolicy(run.getApprovalPolicy())

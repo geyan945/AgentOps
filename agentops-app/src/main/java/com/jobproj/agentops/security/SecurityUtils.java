@@ -21,4 +21,8 @@ public final class SecurityUtils {
     public static Long currentUserId() {
         return currentUser().getId();
     }
+
+    public static Long currentTenantId() {
+        return currentUser().getTenantId();
+    }
 }
